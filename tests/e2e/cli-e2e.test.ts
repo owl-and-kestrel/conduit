@@ -8,6 +8,9 @@ import { describe, expect, it } from 'vitest';
 const execFileAsync = promisify(execFile);
 const cliPath = path.resolve('src/cli/index.ts');
 const tsxPath = path.resolve('node_modules/.bin/tsx');
+// Each case spawns several tsx processes; under a parallel full-suite run the
+// 5 s vitest default is too tight (observed timeouts on Cedar).
+const CLI_SUBPROCESS_TIMEOUT_MS = 60_000;
 
 describe('Conduit CLI end-to-end flows', () => {
   it('runs doctor and the fake transport through the public CLI', async () => {
@@ -36,7 +39,7 @@ describe('Conduit CLI end-to-end flows', () => {
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, CLI_SUBPROCESS_TIMEOUT_MS);
 
   it('creates, lists, and revokes a trusted clipboard session through the public CLI', async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'conduit-session-e2e-'));
@@ -75,7 +78,7 @@ describe('Conduit CLI end-to-end flows', () => {
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, CLI_SUBPROCESS_TIMEOUT_MS);
 });
 
 async function runCli(args: string[], stateRoot: string): Promise<{ stdout: string; stderr: string }> {

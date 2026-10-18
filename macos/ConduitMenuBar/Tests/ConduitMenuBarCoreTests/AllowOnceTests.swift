@@ -49,8 +49,9 @@ final class AllowOnceTests: XCTestCase {
         +new
         """
         XCTAssertEqual(AllowOnce.eligibility(for: Fixtures.approval(tool: "file.patch", path: nil, patch: patch)), .eligible(path: "src/app.ts"))
+        // Creating a file is not an in-place edit: review it in the popover.
         let created = "--- /dev/null\n+++ b/docs/new.md\n@@ -0,0 +1 @@\n+hi\n"
-        XCTAssertEqual(AllowOnce.eligibility(for: Fixtures.approval(tool: "file.patch", path: nil, patch: created)), .eligible(path: "docs/new.md"))
+        XCTAssertEqual(AllowOnce.eligibility(for: Fixtures.approval(tool: "file.patch", path: nil, patch: created)), .ineligible)
     }
 
     func testMultiFileRenameAndDeletePatchesAreNotEligible() {
@@ -81,10 +82,11 @@ final class AllowOnceTests: XCTestCase {
             XCTAssertEqual(AskNotification.make(for: ask).categoryIdentifier, AskNotification.categoryReviewOnly, patch)
             XCTAssertFalse(AskPresentation.title(for: ask).hasPrefix("Patch X"), patch)
         }
-        // The plain edit alone, and a new regular file, stay eligible.
+        // The plain in-place edit alone stays eligible; a new regular file does not.
         XCTAssertEqual(AllowOnce.eligibility(for: Fixtures.approval(tool: "file.patch", path: nil, patch: edit)), .eligible(path: "X"))
         let newFile = "diff --git a/docs/new.md b/docs/new.md\nnew file mode 100644\nindex 0000000..45b983b\n--- /dev/null\n+++ b/docs/new.md\n@@ -0,0 +1 @@\n+hi\n"
-        XCTAssertEqual(AllowOnce.eligibility(for: Fixtures.approval(tool: "file.patch", path: nil, patch: newFile)), .eligible(path: "docs/new.md"))
+        XCTAssertEqual(AllowOnce.eligibility(for: Fixtures.approval(tool: "file.patch", path: nil, patch: newFile)), .ineligible)
+        XCTAssertEqual(AskPresentation.title(for: Fixtures.approval(tool: "file.patch", path: nil, patch: newFile)), "Patch: open details to check everything it changes")
     }
 
     func testNotificationNamesTheExactPathAndCategory() {

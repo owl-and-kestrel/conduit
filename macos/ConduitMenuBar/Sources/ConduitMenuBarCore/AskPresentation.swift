@@ -18,8 +18,8 @@ public enum AskPresentation {
             return "Write a file"
         case "file.patch":
             let paths = AllowOnce.patchTargets(args?.patch ?? "")
-            let files = paths.filter { !$0.hasPrefix("<") }
-            if paths.count == 1, let path = paths.first {
+            let files = paths.filter { !AllowOnce.isMarker($0) }
+            if paths.count == 1, let path = paths.first, !AllowOnce.isMarker(path) {
                 return "Patch \(oneLine(path, limit: 80))"
             }
             if files.count < paths.count {
@@ -135,9 +135,11 @@ public enum AskPresentation {
 ///
 /// A notification shows one short line, so it may offer Allow once only when
 /// that line names everything the approval does. That is true only for a file
-/// write or a single-file patch, where the body names the exact path. Shell
-/// commands, untrusted reviews, multi-file patches and anything else must be
-/// opened in the popover so the full command or manifest is visible first.
+/// write or a patch that only edits one existing file in place, where the body
+/// names the exact path. Shell commands, untrusted reviews, multi-file
+/// patches, patches that create, delete, rename, chmod or symlink, and
+/// anything else must be opened in the popover so the full command or
+/// manifest is visible first.
 public enum AllowOnce {
     public enum Eligibility: Equatable {
         case eligible(path: String)
@@ -152,7 +154,7 @@ public enum AllowOnce {
             return .eligible(path: path)
         case "file.patch":
             let targets = patchTargets(approval.action.args?.patch ?? "")
-            guard targets.count == 1, let path = targets.first, isDisplayablePath(path) else { return .ineligible }
+            guard targets.count == 1, let path = targets.first, !isMarker(path), isDisplayablePath(path) else { return .ineligible }
             return .eligible(path: path)
         default:
             return .ineligible
@@ -168,74 +170,97 @@ public enum AllowOnce {
     }
 
     /// Files a unified / git diff touches, as `git apply` (file.patch, default
-    /// -p1) would act on them. Anything that is not a plain content change of
-    /// a regular file adds a marker target ("<...>") on purpose, so such a
-    /// patch is never "one file": a line saying "Patch x" must not hide that
-    /// x is deleted, moved, made executable or a symlink, or that another
-    /// file changes too. Markers:
-    /// - rename / copy / delete headers, mode changes, a new file whose mode is
-    ///   not 100644, binary patches;
+    /// -p1) would act on them. Only a plain in-place content change of an
+    /// existing file is a path; anything else adds a marker target ("<...>")
+    /// on purpose, so such a patch is never "one file": a line saying "Patch x"
+    /// must not hide that x is created, deleted, moved, made executable or a
+    /// symlink, or that another file changes too. Markers:
+    /// - new files (`new file mode`, `--- /dev/null`), deletes, rename / copy
+    ///   headers, mode changes, binary patches;
     /// - a `diff --git` section with no `---`/`+++` lines (git apply still
-    ///   applies its binary data, new empty file or mode change);
+    ///   applies its binary data, new empty file or mode change), or whose
+    ///   `a/` `b/` names differ from its `---`/`+++` names;
     /// - a `---`/`+++` name without the `a/` / `b/` prefix, or with an empty,
-    ///   `.` or `..` component: git apply strips the first component whatever
-    ///   it is, so the path shown would not be the path written.
+    ///   `.` or `..` component, a tab or surrounding spaces: git apply strips
+    ///   the first component whatever it is and trims names its own way, so
+    ///   the path shown would not be the path written;
+    /// - any carriage return.
+    ///
+    /// The patch is read as UTF-8 bytes split on LF, exactly as git apply reads
+    /// it. Swift's Character view must not be used here: it treats "\r\n" as a
+    /// single character (so "x\r\n--- /dev/null\r\n+++ b/Q" is one "line"), and
+    /// compares grapheme clusters (so "--- " followed by U+0301 does not start
+    /// with "--- "), while git apply acts on both hidden sections.
     public static func patchTargets(_ patch: String) -> [String] {
-        var targets: [String] = []
-        var sectionHeader: Substring?
-        var sectionHasFileLines = false
-        func closeSection() {
-            if let header = sectionHeader, !sectionHasFileLines {
-                targets.append("<\(header)>")
-            }
-            sectionHeader = nil
-            sectionHasFileLines = false
+        let devNull = Array("/dev/null".utf8)
+        var paths: [[UInt8]] = []
+        var markers: [String] = []
+        var header: ArraySlice<UInt8>?
+        var oldName: [UInt8]?
+        var newName: [UInt8]?
+        func text<Bytes: Sequence>(_ bytes: Bytes) -> String where Bytes.Element == UInt8 {
+            String(decoding: Array(bytes), as: UTF8.self)
         }
-        func add(_ raw: Substring, isNewSide: Bool) {
-            sectionHasFileLines = true
-            var path = raw.trimmingCharacters(in: .whitespaces)
-            if let tab = path.firstIndex(of: "\t") { path = String(path[..<tab]) }
-            if path == "/dev/null" {
-                if isNewSide { targets.append("<deleted>") }
-                return
-            }
-            if path.isEmpty { return }
-            let prefix = isNewSide ? "b/" : "a/"
-            if path.hasPrefix(prefix) {
-                path = String(path.dropFirst(2))
-                let components = path.split(separator: "/", omittingEmptySubsequences: false)
-                if components.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) {
-                    targets.append("<unclear path \(path)>")
+        func mark(_ what: String) { markers.append("<\(what)>") }
+        func closeSection() {
+            if let header {
+                if oldName == nil && newName == nil {
+                    mark(text(header))
+                } else if let old = oldName, let new = newName, old != devNull, new != devNull,
+                          !header.elementsEqual(Array("diff --git a/".utf8) + old + Array(" b/".utf8) + new) {
+                    mark("header names differ: \(text(header))")
                 }
-            } else {
-                targets.append("<unprefixed path \(path)>")
             }
-            if !targets.contains(path) { targets.append(path) }
+            header = nil
+            oldName = nil
+            newName = nil
+        }
+        func name(_ raw: ArraySlice<UInt8>, isNewSide: Bool) -> [UInt8] {
+            let name = Array(raw)
+            if name == devNull {
+                mark(isNewSide ? "deleted" : "new file")
+                return name
+            }
+            guard name.starts(with: (isNewSide ? "b/" : "a/").utf8) else {
+                mark("unprefixed path \(text(name))")
+                return name
+            }
+            let path = Array(name.dropFirst(2))
+            let components = path.split(separator: UInt8(ascii: "/"), omittingEmptySubsequences: false)
+            if path.isEmpty || path.contains(UInt8(ascii: "\t")) || path.first == UInt8(ascii: " ") || path.last == UInt8(ascii: " ")
+                || components.contains(where: { $0.isEmpty || $0.elementsEqual(".".utf8) || $0.elementsEqual("..".utf8) }) {
+                mark("unclear path \(text(path))")
+            }
+            if !paths.contains(path) { paths.append(path) }
+            return path
         }
         let markerPrefixes = [
-            "rename from ", "rename to ", "rename old ", "rename new ", "copy from ", "copy to ",
-            "deleted file mode", "old mode ", "new mode ", "similarity index ", "dissimilarity index ",
+            "new file mode ", "deleted file mode", "rename from ", "rename to ", "rename old ", "rename new ",
+            "copy from ", "copy to ", "old mode ", "new mode ", "similarity index ", "dissimilarity index ",
             "GIT binary patch", "Binary files "
         ]
-        for line in patch.split(separator: "\n", omittingEmptySubsequences: false) {
-            if line.hasPrefix("diff --git ") {
+        let bytes = Array(patch.utf8)
+        if bytes.contains(UInt8(ascii: "\r")) { mark("carriage return") }
+        for line in bytes.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false) {
+            if line.starts(with: "diff --git ".utf8) {
                 closeSection()
-                sectionHeader = line
-            } else if line.hasPrefix("--- ") {
-                add(line.dropFirst(4), isNewSide: false)
-            } else if line.hasPrefix("+++ ") {
-                add(line.dropFirst(4), isNewSide: true)
-            } else if line.hasPrefix("new file mode ") {
-                // A new regular file is a plain write; executable or symlink is not.
-                if line.trimmingCharacters(in: .whitespaces) != "new file mode 100644" {
-                    targets.append("<\(line)>")
-                }
-            } else if markerPrefixes.contains(where: { line.hasPrefix($0) }) {
-                targets.append("<\(line)>")
+                header = line
+            } else if line.starts(with: "--- ".utf8) {
+                oldName = name(line.dropFirst(4), isNewSide: false)
+            } else if line.starts(with: "+++ ".utf8) {
+                newName = name(line.dropFirst(4), isNewSide: true)
+            } else if markerPrefixes.contains(where: { line.starts(with: $0.utf8) }) {
+                mark(text(line))
             }
         }
         closeSection()
-        return targets
+        return paths.map { text($0) } + markers
+    }
+
+    /// A marker target from `patchTargets`: never a path that may be shown as
+    /// the one file a patch changes.
+    static func isMarker(_ target: String) -> Bool {
+        target.hasPrefix("<")
     }
 }
 

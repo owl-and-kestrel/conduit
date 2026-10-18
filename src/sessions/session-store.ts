@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { writeFileAtomic } from '../state/atomic-write.js';
+import { withFileLock } from '../state/file-lock.js';
 import { getStateRoot } from '../state/paths.js';
 import { createNonce, createSessionId } from './nonce.js';
 import { isPermissionProfileName, type PermissionProfileName } from './profiles.js';
@@ -57,7 +58,6 @@ const SessionStoreFileSchema = z.object({
 });
 
 export async function createSession(input: CreateSessionInput): Promise<ConduitSession> {
-  const store = await readSessionStore();
   const session: ConduitSession = {
     sessionId: createSessionId(),
     label: input.label,
@@ -71,8 +71,9 @@ export async function createSession(input: CreateSessionInput): Promise<ConduitS
     usedNonces: []
   };
 
-  store.sessions.push(session);
-  await writeSessionStore(store);
+  await mutateSessionStore((store) => {
+    store.sessions.push(session);
+  });
   return session;
 }
 
@@ -120,20 +121,24 @@ export async function resumeSession(sessionId: string): Promise<ConduitSession> 
 
 /** Revokes every session that could still run work. Used by stop-all (kill). */
 export async function revokeAllLiveSessions(): Promise<ConduitSession[]> {
-  const store = await readSessionStore();
-  const revoked: ConduitSession[] = [];
-  store.sessions = store.sessions.map((session) => {
-    if (session.state === 'revoked' || session.state === 'expired') return session;
-    const updated: ConduitSession = { ...session, state: 'revoked' };
-    revoked.push(updated);
-    return updated;
+  return mutateSessionStore((store) => {
+    const revoked: ConduitSession[] = [];
+    store.sessions = store.sessions.map((session) => {
+      if (session.state === 'revoked' || session.state === 'expired') return session;
+      const updated: ConduitSession = { ...session, state: 'revoked' };
+      revoked.push(updated);
+      return updated;
+    });
+    return revoked;
   });
-  await writeSessionStore(store);
-  return revoked;
 }
 
-export async function validateSessionNonce(sessionId: string, nonce: string): Promise<SessionNonceValidation> {
-  const session = await getSession(sessionId);
+/**
+ * Pure nonce validation, shared by the read-only check and the consuming
+ * check-and-set. Unknown sessions report `Unknown session.` so callers that
+ * ask to consume a nonce of a missing session see the same error as before.
+ */
+function checkNonce(session: ConduitSession | null, nonce: string): SessionNonceValidation {
   if (!session) {
     return { ok: false, reason: 'Unknown session.' };
   }
@@ -157,34 +162,55 @@ export async function validateSessionNonce(sessionId: string, nonce: string): Pr
   return { ok: true, session };
 }
 
-export async function consumeSessionNonce(sessionId: string, nonce: string): Promise<ConduitSession> {
-  const validation = await validateSessionNonce(sessionId, nonce);
-  if (!validation.ok) {
-    throw new Error(validation.reason);
-  }
+export async function validateSessionNonce(sessionId: string, nonce: string): Promise<SessionNonceValidation> {
+  return checkNonce(await getSession(sessionId), nonce);
+}
 
-  return updateSession(sessionId, (session) => ({
-    ...session,
-    currentNonce: createNonce(),
-    usedNonces: [...session.usedNonces, nonce],
-    lastActionAt: new Date().toISOString()
-  }));
+export async function consumeSessionNonce(sessionId: string, nonce: string): Promise<ConduitSession> {
+  // Check-and-set under the store lock: two concurrent consumers of the same
+  // nonce cannot both pass validation, because each one does its validation
+  // and rollover against the same freshly read store inside one lock hold.
+  return mutateSessionStore((store) => {
+    const index = store.sessions.findIndex((session) => session.sessionId === sessionId);
+    const validation = checkNonce(index === -1 ? null : store.sessions[index], nonce);
+    if (!validation.ok) {
+      throw new Error(validation.reason);
+    }
+    const updated: ConduitSession = {
+      ...validation.session,
+      currentNonce: createNonce(),
+      usedNonces: [...validation.session.usedNonces, nonce],
+      lastActionAt: new Date().toISOString()
+    };
+    store.sessions[index] = updated;
+    return updated;
+  });
+}
+
+/** Every read-modify-write of sessions.json runs under the store lock, so concurrent writers in other processes or async callers cannot lose each other's updates. */
+async function mutateSessionStore<T>(mutate: (store: { sessions: ConduitSession[] }) => T | Promise<T>): Promise<T> {
+  return withFileLock(getSessionStorePath(), async () => {
+    const store = await readSessionStore();
+    const result = await mutate(store);
+    await writeSessionStore(store);
+    return result;
+  });
 }
 
 async function updateSession(
   sessionId: string,
   updater: (session: ConduitSession) => ConduitSession
 ): Promise<ConduitSession> {
-  const store = await readSessionStore();
-  const index = store.sessions.findIndex((session) => session.sessionId === sessionId);
-  if (index === -1) {
-    throw new Error(`Unknown session: ${sessionId}`);
-  }
+  return mutateSessionStore((store) => {
+    const index = store.sessions.findIndex((session) => session.sessionId === sessionId);
+    if (index === -1) {
+      throw new Error(`Unknown session: ${sessionId}`);
+    }
 
-  const updated = updater(store.sessions[index]);
-  store.sessions[index] = updated;
-  await writeSessionStore(store);
-  return updated;
+    const updated = updater(store.sessions[index]);
+    store.sessions[index] = updated;
+    return updated;
+  });
 }
 
 async function readSessionStore(): Promise<{ sessions: ConduitSession[] }> {

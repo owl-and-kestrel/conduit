@@ -152,39 +152,14 @@ final class ManagedProcess {
     }
 }
 
-/// Parent-pid tree signalling for processes this app did not launch and so
-/// has no ProcessTreeTracker for (a previous run's listener, a timed-out CLI
-/// command). Services this app launched stop through ManagedProcess.stop.
+/// Tree signalling for processes this app keeps no ProcessTreeTracker for (a
+/// previous run's listener, a timed-out CLI command): the kernel process
+/// table (libproc, no pgrep) with Stop all's membership rule and
+/// start-time-checked signals (ProcessSignals.terminateTree). Services this
+/// app launched stop through ManagedProcess.stop.
 enum ProcessTree {
     static func terminateTree(of pid: Int32) {
-        terminateChildren(of: pid)
-        kill(pid, SIGTERM)
-    }
-
-    static func terminateChildren(of pid: Int32) {
-        for child in childPids(of: pid) {
-            terminateTree(of: child)
-        }
-    }
-
-    private static func childPids(of pid: Int32) -> [Int32] {
-        let pkill = Process()
-        let output = Pipe()
-        pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        pkill.arguments = ["-P", String(pid)]
-        pkill.standardOutput = output
-        pkill.standardError = FileHandle.nullDevice
-        do {
-            try pkill.run()
-        } catch {
-            return []
-        }
-        pkill.waitUntilExit()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        let text = String(data: data, encoding: .utf8) ?? ""
-        return text
-            .split(whereSeparator: \.isWhitespace)
-            .compactMap { Int32($0) }
+        ProcessSignals.terminateTree(rootPid: pid, table: KernelProcessTable())
     }
 }
 

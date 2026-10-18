@@ -212,6 +212,34 @@ public enum ProcessSignals {
         }
         return send(SIGKILL, to: targets, table: table, excluding: excluding)
     }
+
+    /// SIGTERM a process this app keeps no tracker for (a previous run's
+    /// listener being replaced, a timed-out CLI command) together with its
+    /// tree, by the same membership rule as Stop all applied to one snapshot
+    /// of the process table: its descendants and, when it leads its own
+    /// process group, that group's members. The root is signalled last, and
+    /// every signal is checked against the start time seen in the snapshot,
+    /// so a pid that exited and was reused in between is skipped. No SIGKILL
+    /// follows: the callers wait for the port to clear or the command to
+    /// exit. Returns the identities signalled.
+    @discardableResult
+    public static func terminateTree(rootPid: Int32, table: ProcessTable, excluding: Set<Int32> = [getpid()]) -> [ProcessIdentity] {
+        guard rootPid > 1, !excluding.contains(rootPid) else {
+            return []
+        }
+        var entries = table.entries()
+        // A failed listing still signals the root itself, as kill(2) on the
+        // pid alone did before.
+        guard let root = entries.first(where: { $0.pid == rootPid }) ?? table.entry(pid: rootPid) else {
+            return []
+        }
+        if !entries.contains(where: { $0.pid == rootPid }) {
+            entries.append(root)
+        }
+        let members = ProcessTreeTracker(root: root).members(in: entries, excluding: excluding)
+        let rootLast = members.filter { $0 != root.identity } + members.filter { $0 == root.identity }
+        return send(SIGTERM, to: rootLast, table: table, excluding: excluding)
+    }
 }
 
 /// The real process table: libproc, no subprocesses.

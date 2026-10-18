@@ -34,7 +34,8 @@ describe('macOS menu-bar package scaffold', () => {
     expect(main).toContain('NSPasteboard.general');
     expect(main).toContain('Quit and Stop Services');
     expect(main).toContain('Keep Running');
-    expect(main).toContain('pkill');
+    expect(main).toContain('ProcessSignals.terminateTree');
+    expect(main).not.toContain('/usr/bin/pgrep');
     expect(main).toContain('Check for Updates');
     expect(main).toContain('scheduleStartupUpdateCheck');
     expect(main).toContain('notifyWhenCurrent: false');

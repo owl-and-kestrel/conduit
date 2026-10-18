@@ -7,12 +7,21 @@ import XCTest
 final class FakeProcessTable: ProcessTable {
     var processes: [Int32: ProcessEntry] = [:]
     private(set) var sent: [(signal: Int32, pid: Int32)] = []
+    /// entries() returns [] (a failed proc_listpids); entry(pid:) still works.
+    var listingFails = false
+    /// Runs after entries() has taken its snapshot: what changes between the
+    /// listing and the signals.
+    var afterListing: ((FakeProcessTable) -> Void)?
 
     init(_ entries: [ProcessEntry]) {
         for entry in entries { processes[entry.pid] = entry }
     }
 
-    func entries() -> [ProcessEntry] { processes.values.sorted { $0.pid < $1.pid } }
+    func entries() -> [ProcessEntry] {
+        let snapshot = listingFails ? [] : processes.values.sorted { $0.pid < $1.pid }
+        afterListing?(self)
+        return snapshot
+    }
     func entry(pid: Int32) -> ProcessEntry? { processes[pid] }
 
     @discardableResult
@@ -269,6 +278,79 @@ final class ProcessTreeSetTests: XCTestCase {
     }
 }
 
+/// ProcessTree.terminateTree (restarting a stale Control or agent listener,
+/// the CLI-command timeout): one snapshot, Stop all's membership rule,
+/// start-time-checked SIGTERM, root last.
+final class TerminateTreeTests: XCTestCase {
+    let app: Set<Int32> = [50]
+    let appEntry = ProcessEntry(pid: 50, ppid: 1, pgid: 50, startTime: 10)
+    let stranger = ProcessEntry(pid: 300, ppid: 1, pgid: 300, startTime: 500)
+    // A previous run's listener: node (200) under npm (150), which leads the
+    // group, so the listener does not lead its own.
+    let npm = ProcessEntry(pid: 150, ppid: 1, pgid: 150, startTime: 900)
+    let listener = ProcessEntry(pid: 200, ppid: 150, pgid: 150, startTime: 1_000)
+    let worker = ProcessEntry(pid: 201, ppid: 200, pgid: 150, startTime: 1_001)
+    let grandchild = ProcessEntry(pid: 202, ppid: 201, pgid: 150, startTime: 1_002)
+
+    func testDescendantsAreSignalledBeforeTheRootAndNothingElse() {
+        let table = FakeProcessTable([appEntry, stranger, npm, listener, worker, grandchild])
+        let signalled = ProcessSignals.terminateTree(rootPid: 200, table: table, excluding: app)
+        XCTAssertEqual(signalled.map(\.pid), [201, 202, 200])
+        XCTAssertEqual(table.sent.map(\.pid), [201, 202, 200], "root last")
+        XCTAssertEqual(Set(table.sent.map(\.signal)), [SIGTERM])
+        XCTAssertFalse(table.sent.contains { [50, 150, 300].contains($0.pid) }, "not its parent's group, the app or a stranger")
+    }
+
+    func testGroupLedByTheRootIsIncludedSoADoubleForkedChildIsReached() {
+        // A timed-out `zsh -lc … npm` command: Foundation's Process made it a
+        // group leader; a child double-forked a daemon now under launchd.
+        let command = ProcessEntry(pid: 400, ppid: 50, pgid: 400, startTime: 2_000)
+        let child = ProcessEntry(pid: 401, ppid: 400, pgid: 400, startTime: 2_001)
+        let daemon = ProcessEntry(pid: 402, ppid: 1, pgid: 400, startTime: 2_002)
+        let table = FakeProcessTable([appEntry, stranger, command, child, daemon])
+        ProcessSignals.terminateTree(rootPid: 400, table: table, excluding: app)
+        XCTAssertEqual(table.sent.map(\.pid), [401, 402, 400])
+    }
+
+    func testPidReusedAfterTheListingIsNotSignalled() {
+        let table = FakeProcessTable([appEntry, listener, worker])
+        table.afterListing = { table in
+            // The worker exits and a stranger gets pid 201 before the kill.
+            table.exit(201)
+            table.add(ProcessEntry(pid: 201, ppid: 1, pgid: 201, startTime: 9_999))
+        }
+        let signalled = ProcessSignals.terminateTree(rootPid: 200, table: table, excluding: app)
+        XCTAssertEqual(signalled.map(\.pid), [200])
+        XCTAssertEqual(table.sent.map(\.pid), [200])
+    }
+
+    func testAFailedListingStillSignalsTheRoot() {
+        let table = FakeProcessTable([appEntry, listener, worker])
+        table.listingFails = true
+        XCTAssertEqual(ProcessSignals.terminateTree(rootPid: 200, table: table, excluding: app).map(\.pid), [200])
+    }
+
+    func testGoneRootSignalsNothing() {
+        let table = FakeProcessTable([appEntry, stranger])
+        XCTAssertEqual(ProcessSignals.terminateTree(rootPid: 200, table: table, excluding: app), [])
+        XCTAssertTrue(table.sent.isEmpty)
+    }
+
+    func testNeverSignalsTheAppLaunchdOrPidZero() {
+        // A corrupt table puts the app and launchd under the root.
+        let table = FakeProcessTable([
+            ProcessEntry(pid: 50, ppid: 200, pgid: 50, startTime: 10),
+            ProcessEntry(pid: 1, ppid: 200, pgid: 1, startTime: 1),
+            listener
+        ])
+        XCTAssertEqual(ProcessSignals.terminateTree(rootPid: 200, table: table, excluding: app).map(\.pid), [200])
+        for pid: Int32 in [50, 1, 0, -1] {
+            XCTAssertEqual(ProcessSignals.terminateTree(rootPid: pid, table: table, excluding: app), [])
+        }
+        XCTAssertEqual(table.sent.map(\.pid), [200])
+    }
+}
+
 private struct WaitTimedOut: Error, CustomStringConvertible {
     let description: String
 }
@@ -360,6 +442,31 @@ final class KernelProcessTreeKillTests: XCTestCase {
         XCTAssertFalse(termed.flatMap(\.members).contains { $0.pid == getpid() })
         ProcessTreeSet.killSurvivors(termed, table: table)
         _ = try waitFor("the orphan to exit") { table.entry(pid: orphan.pid)?.startTime == orphan.startTime ? nil : true }
+    }
+
+    func testTerminateTreeStopsTheRootItsChildAndItsDoubleForkedOrphan() throws {
+        let process = try launch("( /bin/sleep 66.3 & ) ; /bin/sleep 66.1 & exec /bin/sleep 66.2")
+        let rootPid = process.processIdentifier
+        // The orphan reaches launchd only once the subshell has exited, so
+        // after it appears the only child of the root is the backgrounded sleep.
+        let orphan = try waitFor("the orphan") {
+            table.entries().first { $0.pgid == rootPid && $0.pid != rootPid && $0.ppid == 1 }
+        }
+        cleanup.insert(orphan.identity)
+        let child = try waitFor("the child") { table.entries().first { $0.ppid == rootPid } }
+        cleanup.insert(child.identity)
+
+        let signalled = ProcessSignals.terminateTree(rootPid: rootPid, table: table)
+        XCTAssertEqual(signalled.last?.pid, rootPid, "root last")
+        XCTAssertTrue(signalled.contains(child.identity))
+        XCTAssertTrue(signalled.contains(orphan.identity))
+        XCTAssertFalse(signalled.contains { $0.pid == getpid() })
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationReason, .uncaughtSignal)
+        XCTAssertEqual(process.terminationStatus, SIGTERM)
+        for member in [child, orphan] {
+            _ = try waitFor("pid \(member.pid) to exit") { table.entry(pid: member.pid)?.startTime == member.startTime ? nil : true }
+        }
     }
 
     func testSetsidChildObservedBeforeItsParentDiesIsKilled() throws {

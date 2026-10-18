@@ -1,10 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import http from 'node:http';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExtensionTransport } from '../../src/transports/extension-transport.js';
 
 describe('ExtensionTransport', () => {
   let transport: ExtensionTransport;
 
   beforeEach(async () => {
+    // The transport's retry backoff, progress and result timers use
+    // setTimeout. Fake only setTimeout/clearTimeout so those timers fire only
+    // when a test advances the clock (vi.advanceTimersByTimeAsync); real
+    // sockets, node:http, setImmediate and Date keep working (see httpFetch).
+    // Without this, a loaded machine lets the 10 ms backoff fire before the
+    // next /health read.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     transport = new ExtensionTransport({
       port: 0,
       sendResultTimeoutMs: 75,
@@ -17,10 +25,11 @@ describe('ExtensionTransport', () => {
 
   afterEach(async () => {
     await transport.close();
+    vi.useRealTimers();
   });
 
   it('serves health state', async () => {
-    const response = await fetch(`${transport.getBaseUrl()}/health`);
+    const response = await httpFetch(`${transport.getBaseUrl()}/health`);
     expect(response.ok).toBe(true);
     await expect(response.json()).resolves.toMatchObject({
       status: 'ok',
@@ -49,7 +58,7 @@ describe('ExtensionTransport', () => {
       observedAt
     });
 
-    const response = await fetch(`${transport.getBaseUrl()}/health`);
+    const response = await httpFetch(`${transport.getBaseUrl()}/health`);
     await expect(response.json()).resolves.toMatchObject({
       tabAvailability: {
         status: 'ready',
@@ -83,7 +92,7 @@ describe('ExtensionTransport', () => {
       observedAt: '2026-05-05T00:00:00.000Z'
     });
 
-    const stale = await fetch(`${transport.getBaseUrl()}/health`);
+    const stale = await httpFetch(`${transport.getBaseUrl()}/health`);
     await expect(stale.json()).resolves.toMatchObject({
       tabAvailability: {
         status: 'stale',
@@ -97,7 +106,7 @@ describe('ExtensionTransport', () => {
       observedAt: new Date().toISOString()
     });
 
-    const unavailable = await fetch(`${transport.getBaseUrl()}/health`);
+    const unavailable = await httpFetch(`${transport.getBaseUrl()}/health`);
     await expect(unavailable.json()).resolves.toMatchObject({
       tabAvailability: {
         status: 'unavailable',
@@ -166,7 +175,7 @@ describe('ExtensionTransport', () => {
     });
     await expect(send).resolves.toBeUndefined();
 
-    const health = await fetch(`${transport.getBaseUrl()}/health`);
+    const health = await httpFetch(`${transport.getBaseUrl()}/health`);
     await expect(health.json()).resolves.toMatchObject({
       deliveredOutboundCount: 1
     });
@@ -195,7 +204,7 @@ describe('ExtensionTransport', () => {
       text: payload
     });
 
-    const health = await fetch(`${transport.getBaseUrl()}/health`);
+    const health = await httpFetch(`${transport.getBaseUrl()}/health`);
     await expect(health.json()).resolves.toMatchObject({
       pendingSendResults: 1,
       pendingSendResultIds: [outbound.transportId]
@@ -215,7 +224,7 @@ describe('ExtensionTransport', () => {
       error: 'Timed out waiting for send button'
     });
 
-    const health = await fetch(`${transport.getBaseUrl()}/health`);
+    const health = await httpFetch(`${transport.getBaseUrl()}/health`);
     await expect(health.json()).resolves.toMatchObject({
       pendingSendResults: 0,
       retryingOutbound: 1,
@@ -228,7 +237,9 @@ describe('ExtensionTransport', () => {
       }
     });
 
-    await delay(20);
+    const beforeBackoff = await httpFetch(`${transport.getBaseUrl()}/health`);
+    await expect(beforeBackoff.json()).resolves.toMatchObject({ retryingOutbound: 1, outboundQueued: 0 });
+    await vi.advanceTimersByTimeAsync(10);
     const retryResponse = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const retry = await retryResponse.json() as OutboundPollResponse;
     expect(retry).toMatchObject({
@@ -244,21 +255,22 @@ describe('ExtensionTransport', () => {
     const outbound = await response.json() as OutboundPollResponse;
     await expect(send).resolves.toBeUndefined();
 
-    await delay(55);
+    await vi.advanceTimersByTimeAsync(45);
 
-    const health = await fetch(`${transport.getBaseUrl()}/health`);
+    const health = await httpFetch(`${transport.getBaseUrl()}/health`);
     const state = await health.json() as any;
     expect(state).toMatchObject({
       pendingSendResults: 0,
+      retryingOutbound: 1,
+      retryingOutboundIds: [outbound.transportId],
       lastTransportError: {
         transportId: outbound.transportId,
         status: 'timeout',
         retrying: true
       }
     });
-    expect(state.retryingOutboundIds.includes(outbound.transportId) || state.outboundQueued > 0).toBe(true);
 
-    await delay(15);
+    await vi.advanceTimersByTimeAsync(10);
     const retryResponse = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const retry = await retryResponse.json() as OutboundPollResponse;
     expect(retry.transportId).toBe(outbound.transportId);
@@ -271,15 +283,15 @@ describe('ExtensionTransport', () => {
     const outbound = await response.json() as OutboundPollResponse;
     await expect(send).resolves.toBeUndefined();
 
-    await delay(25);
+    await vi.advanceTimersByTimeAsync(25);
     await postJson(`${transport.getBaseUrl()}/api/conduit-tab-status`, {
       tabId: 42,
       status: 'outbound_waiting_for_send_button',
       transportId: outbound.transportId
     });
-    await delay(10);
+    await vi.advanceTimersByTimeAsync(10);
 
-    const health = await fetch(`${transport.getBaseUrl()}/health`);
+    const health = await httpFetch(`${transport.getBaseUrl()}/health`);
     await expect(health.json()).resolves.toMatchObject({
       pendingSendResults: 1,
       retryingOutbound: 0,
@@ -309,20 +321,20 @@ describe('ExtensionTransport', () => {
     const outbound = await response.json() as OutboundPollResponse;
     await expect(send).resolves.toBeUndefined();
 
-    await delay(20);
+    await vi.advanceTimersByTimeAsync(20);
     await postJson(`${transport.getBaseUrl()}/api/conduit-tab-status`, {
       tabId: 42,
       status: 'outbound_waiting_for_send_button',
       transportId: outbound.transportId
     });
-    await delay(20);
+    await vi.advanceTimersByTimeAsync(20);
     await postJson(`${transport.getBaseUrl()}/api/conduit-tab-status`, {
       tabId: 42,
       status: 'outbound_inserted_text',
       transportId: outbound.transportId
     });
 
-    const stillPending = await fetch(`${transport.getBaseUrl()}/health`);
+    const stillPending = await httpFetch(`${transport.getBaseUrl()}/health`);
     await expect(stillPending.json()).resolves.toMatchObject({
       pendingSendResults: 1,
       retryingOutbound: 0,
@@ -348,7 +360,7 @@ describe('ExtensionTransport', () => {
       error: 'Composer not ready'
     });
 
-    const retrying = await fetch(`${transport.getBaseUrl()}/health`);
+    const retrying = await httpFetch(`${transport.getBaseUrl()}/health`);
     await expect(retrying.json()).resolves.toMatchObject({
       retryingOutbound: 1,
       retryingOutboundIds: [first.transportId]
@@ -363,7 +375,7 @@ describe('ExtensionTransport', () => {
       status: 'queued'
     });
 
-    const retryState = await fetch(`${transport.getBaseUrl()}/health`);
+    const retryState = await httpFetch(`${transport.getBaseUrl()}/health`);
     await expect(retryState.json()).resolves.toMatchObject({
       retryingOutbound: 0,
       lastTransportError: {
@@ -391,15 +403,15 @@ describe('ExtensionTransport', () => {
         status: 'failed',
         error
       });
-      await delay(25);
-      const health = await fetch(`${transport.getBaseUrl()}/health`);
+      await vi.advanceTimersByTimeAsync(25);
+      const health = await httpFetch(`${transport.getBaseUrl()}/health`);
       const state = await health.json() as any;
       if (!state.lastTransportError?.exhausted) {
         await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
       }
     }
 
-    const health = await fetch(`${transport.getBaseUrl()}/health`);
+    const health = await httpFetch(`${transport.getBaseUrl()}/health`);
     await expect(health.json()).resolves.toMatchObject({
       retryingOutbound: 0,
       attentionOutbound: 1,
@@ -427,8 +439,8 @@ describe('ExtensionTransport', () => {
         status: 'failed',
         error
       });
-      await delay(25);
-      const health = await fetch(`${transport.getBaseUrl()}/health`);
+      await vi.advanceTimersByTimeAsync(25);
+      const health = await httpFetch(`${transport.getBaseUrl()}/health`);
       const state = await health.json() as any;
       if (!state.lastTransportError?.exhausted) {
         await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
@@ -448,7 +460,7 @@ describe('ExtensionTransport', () => {
     const retry = await retryResponse.json() as OutboundPollResponse;
     expect(retry.transportId).toBe(first.transportId);
 
-    const state = await fetch(`${transport.getBaseUrl()}/health`);
+    const state = await httpFetch(`${transport.getBaseUrl()}/health`);
     await expect(state.json()).resolves.toMatchObject({
       attentionOutbound: 0,
       lastTransportError: {
@@ -478,7 +490,7 @@ let bridgeToken = '';
 
 /** Pairs the way the extension does: POST /api/conduit-pair from its own origin. */
 async function pairAsExtension(target: ExtensionTransport, origin = EXTENSION_ORIGIN): Promise<string> {
-  const response = await fetch(`${target.getBaseUrl()}/api/conduit-pair`, {
+  const response = await httpFetch(`${target.getBaseUrl()}/api/conduit-pair`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Origin: origin },
     body: '{}'
@@ -489,14 +501,49 @@ async function pairAsExtension(target: ExtensionTransport, origin = EXTENSION_OR
 }
 
 /** fetch as the paired extension: its origin plus the bridge token. */
-function bridgeFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(url, {
+function bridgeFetch(url: string, init: HttpRequestInit = {}): Promise<HttpResponse> {
+  return httpFetch(url, {
     ...init,
     headers: {
-      ...(init.headers as Record<string, string> | undefined),
+      ...init.headers,
       Origin: EXTENSION_ORIGIN,
       'X-Conduit-Bridge-Token': bridgeToken
     }
+  });
+}
+
+interface HttpRequestInit {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+interface HttpResponse {
+  ok: boolean;
+  status: number;
+  json(): Promise<any>;
+}
+
+/**
+ * A minimal fetch over node:http, one connection per request. The global
+ * fetch (undici) waits on a global setTimeout when it reuses a keep-alive
+ * connection, which never fires while these tests fake the clock; node:http
+ * uses Node's internal timers, which vitest leaves real.
+ */
+function httpFetch(url: string, init: HttpRequestInit = {}): Promise<HttpResponse> {
+  return new Promise((resolve, reject) => {
+    const request = http.request(url, { method: init.method ?? 'GET', headers: init.headers, agent: false }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk: Buffer) => chunks.push(chunk));
+      response.on('error', reject);
+      response.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        const status = response.statusCode ?? 0;
+        resolve({ ok: status >= 200 && status < 300, status, json: async () => JSON.parse(text) });
+      });
+    });
+    request.on('error', reject);
+    request.end(init.body);
   });
 }
 
@@ -504,10 +551,6 @@ interface OutboundPollResponse {
   type: string;
   transportId: string;
   message: string;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function postJson(url: string, body: unknown): Promise<any> {

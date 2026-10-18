@@ -1,10 +1,9 @@
 import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
-import path from 'node:path';
 import { ClipboardWatcher } from '../daemon/clipboard-watcher.js';
 import { MacClipboardIO, type ClipboardIO } from '../daemon/clipboard-io.js';
-import { getRunsRoot, getStateRoot } from '../state/paths.js';
+import { getRunsRoot, getStateRoot, isSafeRunId, resolveRunFile, RunPathError } from '../state/paths.js';
 import { createSession, listSessions, pauseSession, resumeSession, revokeSession } from '../sessions/session-store.js';
 import { isPermissionProfileName } from '../sessions/profiles.js';
 import { renderAgentHandshake } from '../protocol/render-agent-handshake.js';
@@ -356,11 +355,31 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 
     const runResultMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/result$/);
     if (req.method === 'GET' && runResultMatch?.[1]) {
-      const runId = decodeURIComponent(runResultMatch[1]);
-      const result = await readOptionalFile(path.join(getRunsRoot(), runId, 'result.txt'))
-        ?? await readOptionalFile(path.join(getRunsRoot(), runId, 'final.md'))
-        ?? '';
-      sendJson(res, 200, { runId, result });
+      let runId: string;
+      try {
+        runId = decodeURIComponent(runResultMatch[1]);
+      } catch {
+        // A malformed percent escape is a bad request, not a server fault.
+        sendJson(res, 400, { error: 'Invalid run id.' });
+        return;
+      }
+      if (!isSafeRunId(runId)) {
+        sendJson(res, 400, { error: 'Invalid run id.' });
+        return;
+      }
+      try {
+        const result = await readRunFile(runId, 'result.txt')
+          ?? await readRunFile(runId, 'final.md')
+          ?? '';
+        sendJson(res, 200, { runId, result });
+      } catch (error) {
+        // A symlinked run path escaping the runs root is just a missing run.
+        if (error instanceof RunPathError) {
+          sendJson(res, 404, { error: 'Unknown run.' });
+          return;
+        }
+        throw error;
+      }
       return;
     }
 
@@ -389,35 +408,45 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 }
 
 async function listRuns(): Promise<Array<Record<string, unknown>>> {
-  const runsRoot = getRunsRoot();
   let runIds: string[];
   try {
-    runIds = await readdir(runsRoot);
+    runIds = await readdir(getRunsRoot());
   } catch {
     return [];
   }
 
-  const runs = await Promise.all(runIds.sort().reverse().slice(0, 50).map(async (runId) => {
-    const runDir = path.join(runsRoot, runId);
-    const metadata = await readJsonFile(path.join(runDir, 'metadata.json'));
-    const final = await readJsonFile(path.join(runDir, 'final.json'));
-    const resultText = await readOptionalFile(path.join(runDir, 'result.txt'));
-    return {
-      runId,
-      mode: metadata?.mode ?? 'agent-loop',
-      approvalId: metadata?.approvalId,
-      projectRoot: metadata?.projectRoot,
-      startedAt: metadata?.startedAt,
-      status: final?.status ?? (resultText ? 'request' : 'unknown'),
-      summary: final?.summary,
-      hasResult: Boolean(resultText)
-    };
+  const runs = await Promise.all(runIds.filter(isSafeRunId).sort().reverse().slice(0, 50).map(async (runId): Promise<Record<string, unknown> | null> => {
+    try {
+      const metadata = await readRunJson(runId, 'metadata.json');
+      const final = await readRunJson(runId, 'final.json');
+      const resultText = await readRunFile(runId, 'result.txt');
+      return {
+        runId,
+        mode: metadata?.mode ?? 'agent-loop',
+        approvalId: metadata?.approvalId,
+        projectRoot: metadata?.projectRoot,
+        startedAt: metadata?.startedAt,
+        status: final?.status ?? (resultText ? 'request' : 'unknown'),
+        summary: final?.summary,
+        hasResult: Boolean(resultText)
+      };
+    } catch (error) {
+      // A run whose path escapes the runs root through a symlink is left out
+      // of the list; its files are never read.
+      if (error instanceof RunPathError) return null;
+      throw error;
+    }
   }));
-  return runs;
+  return runs.filter((run): run is Record<string, unknown> => run !== null);
 }
 
-async function readJsonFile(filePath: string): Promise<Record<string, unknown> | null> {
-  const text = await readOptionalFile(filePath);
+async function readRunFile(runId: string, fileName: string): Promise<string | null> {
+  const resolved = await resolveRunFile(runId, fileName);
+  return resolved ? readOptionalFile(resolved) : null;
+}
+
+async function readRunJson(runId: string, fileName: string): Promise<Record<string, unknown> | null> {
+  const text = await readRunFile(runId, fileName);
   if (!text) return null;
   try {
     const parsed = JSON.parse(text) as unknown;

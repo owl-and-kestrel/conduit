@@ -3,7 +3,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { listApprovalRequests, type ApprovalRecord } from '../approvals/approval-store.js';
 import { listSessions, type ConduitSession } from '../sessions/session-store.js';
-import { getRunsRoot, getStateRoot } from '../state/paths.js';
+import { getRunsRoot, getStateRoot, isSafeRunId, resolveRunFile, RunPathError } from '../state/paths.js';
 
 export interface DiagnosticBundle {
   schema: 'conduit.diagnostic-bundle.v1';
@@ -125,20 +125,38 @@ async function listRecentRuns(): Promise<Array<Record<string, unknown>>> {
     return [];
   }
 
-  return Promise.all(runIds.sort().reverse().slice(0, 20).map(async (runId) => {
-    const runDir = path.join(getRunsRoot(), runId);
-    const metadata = await readJsonFile(path.join(runDir, 'metadata.json'));
-    const final = await readJsonFile(path.join(runDir, 'final.json'));
-    return {
-      runId,
-      mode: metadata?.mode,
-      approvalId: metadata?.approvalId,
-      projectRoot: metadata?.projectRoot,
-      startedAt: metadata?.startedAt,
-      status: final?.status ?? 'unknown',
-      summary: final?.summary
-    };
+  const runs = await Promise.all(runIds.filter(isSafeRunId).sort().reverse().slice(0, 20).map(async (runId): Promise<Record<string, unknown> | null> => {
+    try {
+      const metadata = await readRunJson(runId, 'metadata.json');
+      const final = await readRunJson(runId, 'final.json');
+      return {
+        runId,
+        mode: metadata?.mode,
+        approvalId: metadata?.approvalId,
+        projectRoot: metadata?.projectRoot,
+        startedAt: metadata?.startedAt,
+        status: final?.status ?? 'unknown',
+        summary: final?.summary
+      };
+    } catch (error) {
+      // A symlinked run path escaping the runs root leaves the run described,
+      // never the file it points at.
+      if (error instanceof RunPathError) return null;
+      throw error;
+    }
   }));
+  return runs.filter((run): run is Record<string, unknown> => run !== null);
+}
+
+async function readRunJson(runId: string, fileName: string): Promise<Record<string, unknown> | null> {
+  const resolved = await resolveRunFile(runId, fileName);
+  if (!resolved) return null;
+  try {
+    const parsed = JSON.parse(await readFile(resolved, 'utf8')) as unknown;
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 async function readLogSummaries(logPaths: string[]): Promise<DiagnosticBundle['logs']> {

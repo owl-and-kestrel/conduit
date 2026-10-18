@@ -117,6 +117,23 @@ describe('CLI / API parity for pause and approvals (S1/S2)', () => {
     expect((error as ControlApiError).status).toBe(404);
   });
 
+  it('refuses a traversal run id, and the CLI reports the refusal cleanly', async () => {
+    await mkdir(path.join(stateRoot, 'secret'), { recursive: true });
+    await writeFile(path.join(stateRoot, 'secret', 'result.txt'), 'TOP SECRET', 'utf8');
+    const client = new ControlClient({ url: app.url });
+    const error = await client.runResult('../secret').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ControlApiError);
+    expect((error as ControlApiError).status).toBe(400);
+
+    const failed = await runCli(['runs', 'result', '../secret', '--url', app.url], stateRoot).then(
+      () => null,
+      (caught: { code?: number; stdout?: string; stderr?: string }) => caught
+    );
+    expect(failed?.code).toBe(1);
+    expect(failed?.stderr).toContain('conduit: Invalid run id.');
+    expect(`${failed?.stdout ?? ''}${failed?.stderr ?? ''}`).not.toContain('TOP SECRET');
+  }, 60_000);
+
   it('drives approvals and pause through the public CLI against a running Control', async () => {
     const approval = await createApprovalRequest({
       action: { id: 'write', tool: 'file.write', args: { path: 'notes.txt', content: 'x' }, reason: 'Persist.', risk: 'high' },

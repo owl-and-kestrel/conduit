@@ -37,7 +37,11 @@ struct PopoverView: View {
                     ))
                     .toggleStyle(.switch)
                     .controlSize(.small)
-                    .disabled(model.busy || !controlUp)
+                    // Stays enabled while Control is down: that is when the
+                    // pause falls back to `conduit pause --local`. With Control
+                    // unreachable the state is not paused, so the switch can
+                    // only pause, never resume.
+                    .disabled(model.busy)
                     .help("Pause or resume everything (⌘P)")
                 }
             }
@@ -148,11 +152,6 @@ struct PopoverView: View {
 
     private var isStopped: Bool {
         model.state.stopped
-    }
-
-    private var controlUp: Bool {
-        if case .error(_, .restartServices) = model.state.kind { return false }
-        return true
     }
 
     private var headerSymbol: String {

@@ -63,6 +63,30 @@ final class AllowOnceTests: XCTestCase {
         }
     }
 
+    /// `git apply` (file.patch) also acts on sections without ---/+++ lines and
+    /// strips the first path component whatever it is. None of these may read
+    /// as "Patch X" in a notification.
+    func testPatchesThatTouchMoreThanTheShownFileAreNotEligible() {
+        let edit = "diff --git a/X b/X\nindex ce01362..14be0d4 100644\n--- a/X\n+++ b/X\n@@ -1 +1 @@\n-hello\n+hello2\n"
+        let hiddenBinaryFile = edit + "diff --git a/Y b/Y\nnew file mode 100755\nindex 0000000000000000000000000000000000000000..ba6a4ef7f01a8703adaa027c005c4a0675087fcc\nGIT binary patch\nliteral 21\nccmY#Z)KALH(=X28N=?qlS12gYOHJVd07Y&Fr~m)}\n\nliteral 0\nHcmV?d00001\n\n"
+        let hiddenModeChange = edit + "diff --git a/Y b/Y\nold mode 100644\nnew mode 100755\n"
+        let hiddenEmptyFile = edit + "diff --git a/Z b/Z\nnew file mode 100644\nindex 0000000..e69de29\n"
+        let unprefixed = "--- docs/package.json\n+++ docs/package.json\n@@ -1 +1 @@\n-hello\n+hello2\n"
+        let symlink = "diff --git a/link b/link\nnew file mode 120000\nindex 0000000..1111111\n--- /dev/null\n+++ b/link\n@@ -0,0 +1 @@\n+/etc/hosts\n\\ No newline at end of file\n"
+        let executable = "diff --git a/run.sh b/run.sh\nnew file mode 100755\n--- /dev/null\n+++ b/run.sh\n@@ -0,0 +1 @@\n+echo hi\n"
+        let dotted = "--- a/./X\n+++ b/./X\n@@ -1 +1 @@\n-x\n+y\n"
+        for patch in [hiddenBinaryFile, hiddenModeChange, hiddenEmptyFile, unprefixed, symlink, executable, dotted] {
+            let ask = Fixtures.approval(tool: "file.patch", path: nil, patch: patch)
+            XCTAssertEqual(AllowOnce.eligibility(for: ask), .ineligible, patch)
+            XCTAssertEqual(AskNotification.make(for: ask).categoryIdentifier, AskNotification.categoryReviewOnly, patch)
+            XCTAssertFalse(AskPresentation.title(for: ask).hasPrefix("Patch X"), patch)
+        }
+        // The plain edit alone, and a new regular file, stay eligible.
+        XCTAssertEqual(AllowOnce.eligibility(for: Fixtures.approval(tool: "file.patch", path: nil, patch: edit)), .eligible(path: "X"))
+        let newFile = "diff --git a/docs/new.md b/docs/new.md\nnew file mode 100644\nindex 0000000..45b983b\n--- /dev/null\n+++ b/docs/new.md\n@@ -0,0 +1 @@\n+hi\n"
+        XCTAssertEqual(AllowOnce.eligibility(for: Fixtures.approval(tool: "file.patch", path: nil, patch: newFile)), .eligible(path: "docs/new.md"))
+    }
+
     func testNotificationNamesTheExactPathAndCategory() {
         let note = AskNotification.make(for: Fixtures.approval())
         XCTAssertEqual(note.categoryIdentifier, AskNotification.categoryAllowOnce)

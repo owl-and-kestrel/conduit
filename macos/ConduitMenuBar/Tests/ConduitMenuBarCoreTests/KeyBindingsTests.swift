@@ -25,6 +25,15 @@ final class KeyBindingsTests: XCTestCase {
         XCTAssertNil(KeyBindings.command(for: KeyInput(.character("c"), option: true, control: true)), "the global hotkey is not a popover command")
     }
 
+    func testHeldKeysNeverDecide() {
+        // Holding Return or ⌘⌫ must not walk down the list deciding each ask.
+        XCTAssertNil(KeyBindings.command(for: KeyInput(.returnKey, isRepeat: true)))
+        XCTAssertNil(KeyBindings.command(for: KeyInput(.returnKey, command: true, isRepeat: true)))
+        XCTAssertNil(KeyBindings.command(for: KeyInput(.delete, command: true, isRepeat: true)))
+        // Holding an arrow still moves the selection.
+        XCTAssertEqual(KeyBindings.command(for: KeyInput(.down, isRepeat: true)), .selectNext)
+    }
+
     func testSelectionFollowsIdsAndFallsBackToOldest() {
         let a = Fixtures.approval(id: "approval_a", createdAt: "2026-10-18T06:00:00.000Z")
         let b = Fixtures.approval(id: "approval_b", createdAt: "2026-10-18T06:01:00.000Z")

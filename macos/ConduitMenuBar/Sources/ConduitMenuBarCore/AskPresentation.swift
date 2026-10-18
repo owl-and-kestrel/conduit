@@ -23,7 +23,7 @@ public enum AskPresentation {
                 return "Patch \(oneLine(path, limit: 80))"
             }
             if files.count < paths.count {
-                return "Patch that moves or deletes files"
+                return "Patch: open details to check everything it changes"
             }
             return files.isEmpty ? "Apply a patch" : "Patch \(files.count) files"
         case "shell.run":
@@ -167,12 +167,32 @@ public enum AllowOnce {
             && !path.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
     }
 
-    /// Files a unified / git diff touches. A rename, copy or deletion adds a
-    /// marker target on purpose, so such a patch is never "one file": a line
-    /// saying "Patch x" must not hide that x is deleted or moved.
+    /// Files a unified / git diff touches, as `git apply` (file.patch, default
+    /// -p1) would act on them. Anything that is not a plain content change of
+    /// a regular file adds a marker target ("<...>") on purpose, so such a
+    /// patch is never "one file": a line saying "Patch x" must not hide that
+    /// x is deleted, moved, made executable or a symlink, or that another
+    /// file changes too. Markers:
+    /// - rename / copy / delete headers, mode changes, a new file whose mode is
+    ///   not 100644, binary patches;
+    /// - a `diff --git` section with no `---`/`+++` lines (git apply still
+    ///   applies its binary data, new empty file or mode change);
+    /// - a `---`/`+++` name without the `a/` / `b/` prefix, or with an empty,
+    ///   `.` or `..` component: git apply strips the first component whatever
+    ///   it is, so the path shown would not be the path written.
     public static func patchTargets(_ patch: String) -> [String] {
         var targets: [String] = []
+        var sectionHeader: Substring?
+        var sectionHasFileLines = false
+        func closeSection() {
+            if let header = sectionHeader, !sectionHasFileLines {
+                targets.append("<\(header)>")
+            }
+            sectionHeader = nil
+            sectionHasFileLines = false
+        }
         func add(_ raw: Substring, isNewSide: Bool) {
+            sectionHasFileLines = true
             var path = raw.trimmingCharacters(in: .whitespaces)
             if let tab = path.firstIndex(of: "\t") { path = String(path[..<tab]) }
             if path == "/dev/null" {
@@ -180,20 +200,41 @@ public enum AllowOnce {
                 return
             }
             if path.isEmpty { return }
-            if path.hasPrefix("a/") || path.hasPrefix("b/") { path = String(path.dropFirst(2)) }
+            let prefix = isNewSide ? "b/" : "a/"
+            if path.hasPrefix(prefix) {
+                path = String(path.dropFirst(2))
+                let components = path.split(separator: "/", omittingEmptySubsequences: false)
+                if components.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) {
+                    targets.append("<unclear path \(path)>")
+                }
+            } else {
+                targets.append("<unprefixed path \(path)>")
+            }
             if !targets.contains(path) { targets.append(path) }
         }
+        let markerPrefixes = [
+            "rename from ", "rename to ", "rename old ", "rename new ", "copy from ", "copy to ",
+            "deleted file mode", "old mode ", "new mode ", "similarity index ", "dissimilarity index ",
+            "GIT binary patch", "Binary files "
+        ]
         for line in patch.split(separator: "\n", omittingEmptySubsequences: false) {
-            if line.hasPrefix("--- ") {
+            if line.hasPrefix("diff --git ") {
+                closeSection()
+                sectionHeader = line
+            } else if line.hasPrefix("--- ") {
                 add(line.dropFirst(4), isNewSide: false)
             } else if line.hasPrefix("+++ ") {
                 add(line.dropFirst(4), isNewSide: true)
-            } else if line.hasPrefix("rename from ") || line.hasPrefix("rename to ")
-                        || line.hasPrefix("copy from ") || line.hasPrefix("copy to ")
-                        || line.hasPrefix("deleted file mode") {
+            } else if line.hasPrefix("new file mode ") {
+                // A new regular file is a plain write; executable or symlink is not.
+                if line.trimmingCharacters(in: .whitespaces) != "new file mode 100644" {
+                    targets.append("<\(line)>")
+                }
+            } else if markerPrefixes.contains(where: { line.hasPrefix($0) }) {
                 targets.append("<\(line)>")
             }
         }
+        closeSection()
         return targets
     }
 }

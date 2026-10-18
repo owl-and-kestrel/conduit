@@ -83,7 +83,8 @@ enum PopoverKeys {
             command: flags.contains(.command),
             option: flags.contains(.option),
             control: flags.contains(.control),
-            shift: flags.contains(.shift)
+            shift: flags.contains(.shift),
+            isRepeat: event.isARepeat
         )
     }
 }

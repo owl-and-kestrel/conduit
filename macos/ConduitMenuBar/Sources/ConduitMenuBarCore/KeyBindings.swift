@@ -27,13 +27,16 @@ public struct KeyInput: Equatable {
     public let option: Bool
     public let control: Bool
     public let shift: Bool
+    /// An auto-repeated keyDown (the key is being held).
+    public let isRepeat: Bool
 
-    public init(_ key: Key, command: Bool = false, option: Bool = false, control: Bool = false, shift: Bool = false) {
+    public init(_ key: Key, command: Bool = false, option: Bool = false, control: Bool = false, shift: Bool = false, isRepeat: Bool = false) {
         self.key = key
         self.command = command
         self.option = option
         self.control = control
         self.shift = shift
+        self.isRepeat = isRepeat
     }
 }
 
@@ -47,6 +50,10 @@ public enum KeyBindings {
         // Ignore anything with ⌃ or ⌥: those belong to the system or the
         // global hotkey, never to an approval.
         if input.control || input.option { return nil }
+        // A held key never decides: after the selected ask is decided the
+        // selection falls back to the next one, so an auto-repeated Return or
+        // ⌘⌫ would otherwise decide asks the person has not looked at.
+        if input.isRepeat, input.key == .returnKey || input.key == .delete { return nil }
         switch input.key {
         case .up where !input.command: return .selectPrevious
         case .down where !input.command: return .selectNext

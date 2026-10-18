@@ -24,8 +24,16 @@ export interface ExecuteActionsInput {
   turn: number;
   yes?: boolean;
   policySession?: ConduitSession;
-  confirm?: (request: ConfirmationRequest) => Promise<boolean>;
+  confirm?: ConfirmFn;
 }
+
+/**
+ * Outcome of an ask. A plain boolean is accepted from simple callers; the
+ * object form lets the shared approval path report who decided (`decidedBy`)
+ * so every decision in `policy-decisions.jsonl` carries one.
+ */
+export type ConfirmationOutcome = boolean | { approved: boolean; decidedBy?: string; approvalId?: string };
+export type ConfirmFn = (request: ConfirmationRequest) => Promise<ConfirmationOutcome>;
 
 export async function executeActions(input: ExecuteActionsInput): Promise<ToolResult[]> {
   const results: ToolResult[] = [];
@@ -56,6 +64,7 @@ export async function executeActions(input: ExecuteActionsInput): Promise<ToolRe
       actionId: action.id,
       tool: action.tool,
       ...policyDecision,
+      ...(policyDecision.decision === 'requires_confirmation' ? {} : { decidedBy: 'policy' }),
       timestamp: new Date().toISOString()
     });
 
@@ -65,7 +74,8 @@ export async function executeActions(input: ExecuteActionsInput): Promise<ToolRe
       runId: input.runId,
       runDir: input.runDir,
       projectRoot: input.projectRoot,
-      sessionId: policySession.sessionId
+      sessionId: policySession.sessionId,
+      turn: input.turn
     });
     if (policyResult) {
       results.push(policyResult);
@@ -134,11 +144,12 @@ async function handlePolicyDecision(
   decision: PolicyDecision,
   input: {
     yes?: boolean;
-    confirm: (request: ConfirmationRequest) => Promise<boolean>;
+    confirm: ConfirmFn;
     runId: string;
     runDir: string;
     projectRoot: string;
     sessionId?: string;
+    turn: number;
   }
 ): Promise<ToolResult | null> {
   if (decision.decision === 'allow') {
@@ -147,6 +158,7 @@ async function handlePolicyDecision(
 
   if (decision.decision === 'requires_confirmation') {
     if (input.yes) {
+      await logConfirmation(input, action, { approved: true, decidedBy: 'yes-flag' });
       return null;
     }
 
@@ -158,7 +170,7 @@ async function handlePolicyDecision(
       `Args: ${JSON.stringify(action.args)}`,
       'Allow this action? (y/N): '
     ].join('\n');
-    const confirmed = await input.confirm({
+    const outcome = normalizeOutcome(await input.confirm({
       action,
       policyReason: decision.reason,
       prompt,
@@ -166,8 +178,9 @@ async function handlePolicyDecision(
       runDir: input.runDir,
       projectRoot: input.projectRoot,
       sessionId: input.sessionId
-    });
-    if (confirmed) {
+    }));
+    await logConfirmation(input, action, outcome);
+    if (outcome.approved) {
       return null;
     }
 
@@ -187,6 +200,27 @@ async function handlePolicyDecision(
   };
 }
 
+function normalizeOutcome(outcome: ConfirmationOutcome): { approved: boolean; decidedBy?: string; approvalId?: string } {
+  return typeof outcome === 'boolean' ? { approved: outcome } : outcome;
+}
+
+async function logConfirmation(
+  input: { runDir: string; turn: number },
+  action: ToolAction,
+  outcome: { approved: boolean; decidedBy?: string; approvalId?: string }
+): Promise<void> {
+  await appendJsonl(input.runDir, 'policy-decisions.jsonl', {
+    turn: input.turn,
+    actionId: action.id,
+    tool: action.tool,
+    decision: outcome.approved ? 'allow' : 'deny',
+    reason: outcome.approved ? 'Confirmed.' : 'Not confirmed.',
+    decidedBy: outcome.decidedBy ?? 'confirm-callback',
+    ...(outcome.approvalId ? { approvalId: outcome.approvalId } : {}),
+    timestamp: new Date().toISOString()
+  });
+}
+
 function createEphemeralPolicySession(projectRoot: string): ConduitSession {
   return {
     sessionId: 'sess_ephemeral_agent_loop',
@@ -201,16 +235,20 @@ function createEphemeralPolicySession(projectRoot: string): ConduitSession {
   };
 }
 
-function defaultConfirmation(request: ConfirmationRequest): Promise<boolean> {
+function defaultConfirmation(request: ConfirmationRequest): Promise<ConfirmationOutcome> {
   return requestSharedApproval(request);
 }
 
-async function requestSharedApproval(request: ConfirmationRequest): Promise<boolean> {
-  const record = await createApprovalRequest(request);
+async function requestSharedApproval(request: ConfirmationRequest): Promise<ConfirmationOutcome> {
+  const record = await createApprovalRequest(request, { timeoutMs: DEFAULT_APPROVAL_TIMEOUT_MS });
   const closeTerminalPrompt = offerTerminalApproval(record, request);
   try {
     const decided = await waitForApprovalDecision(record.approvalId, DEFAULT_APPROVAL_TIMEOUT_MS);
-    return decided.status === 'approved';
+    return {
+      approved: decided.status === 'approved',
+      approvalId: decided.approvalId,
+      ...(decided.decidedBy ? { decidedBy: decided.decidedBy } : {})
+    };
   } finally {
     closeTerminalPrompt?.();
   }

@@ -372,6 +372,17 @@ describe('control panel app', () => {
     expect(created.handshake).toContain(created.session.sessionId);
   });
 
+  it('ships a clearly labelled demo data mode that never calls the local API', async () => {
+    const html = await fetchText(`${app.url}/`);
+    expect(html).toContain('Demo data');
+    expect(html).toContain('Nothing on this page reads or changes your machine');
+    expect(html).toContain('prefers-color-scheme: dark');
+    const script = await fetchText(`${app.url}/app.js`);
+    expect(script).toContain("new URLSearchParams(location.search).has('demo')");
+    expect(script).toContain('if (DEMO) return demoApi(path, options);');
+    expect(script).toContain('demo mode does not read your clipboard');
+  });
+
   it('refuses cross-origin and DNS-rebinding requests to the local API', async () => {
     const pending = await createApprovalRequest({
       action: { id: 'write_notes', tool: 'file.write', args: { path: 'notes.txt', content: 'x' }, reason: 'Persist notes.', risk: 'high' },

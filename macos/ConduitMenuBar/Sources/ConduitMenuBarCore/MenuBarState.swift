@@ -33,6 +33,9 @@ public struct ServiceSnapshot: Equatable {
     /// Whether the Control that answered is this checkout's. One that is not
     /// is never used (the app passes no status for it) and is named here.
     public var controlAdoption: ControlAdoption
+    /// The pause flag read from the state root (LocalPause), when Control is
+    /// unreachable. nil when it was not read.
+    public var localPause: LocalPauseState?
 
     public init(
         controlReachable: Bool,
@@ -40,7 +43,8 @@ public struct ServiceSnapshot: Equatable {
         agentListenerNeedsAttention: Bool = false,
         stoppedByUser: Bool = false,
         controlStarting: Bool = false,
-        controlAdoption: ControlAdoption = .thisCheckout
+        controlAdoption: ControlAdoption = .thisCheckout,
+        localPause: LocalPauseState? = nil
     ) {
         self.controlReachable = controlReachable
         self.crashedServices = crashedServices
@@ -48,6 +52,7 @@ public struct ServiceSnapshot: Equatable {
         self.stoppedByUser = stoppedByUser
         self.controlStarting = controlStarting
         self.controlAdoption = controlAdoption
+        self.localPause = localPause
     }
 }
 
@@ -61,6 +66,9 @@ public struct MenuBarState: Equatable {
     public let paused: Bool
     /// The person used Stop all: services are off on purpose.
     public var stopped: Bool = false
+    /// Paused, but known only from the flag on disk because Control does not
+    /// answer: asks are unknown and resuming needs Control.
+    public var controlUnreachable: Bool = false
 
     /// Oldest first, by `createdAt` (ISO 8601 sorts lexically), then id.
     public static func orderAsks(_ approvals: [ApprovalSummary]) -> [ApprovalSummary] {
@@ -74,9 +82,11 @@ public struct MenuBarState: Equatable {
     }
 
     /// The reducer. Precedence, highest first:
-    /// 1. Control unreachable, or not this checkout's (ControlAdoption), while
-    ///    not stopped on purpose: error. Without this checkout's Control the
-    ///    menu bar cannot know whether anything is paused or waiting.
+    /// 1. Control not this checkout's (ControlAdoption), while not stopped on
+    ///    purpose: error. Control unreachable: paused when the pause flag on
+    ///    disk says so (`conduit pause --local` writes it while Control is
+    ///    down), otherwise error. Without this checkout's Control the menu bar
+    ///    cannot know whether anything is waiting.
     /// 2. Paused (global flag, or stopped by the person): nothing executes, and
     ///    that must always be visible. Pending asks still show as a count.
     /// 3. Needs you: pending asks win over running (spec §3.1).
@@ -127,6 +137,17 @@ public struct MenuBarState: Equatable {
         }
 
         guard services.controlReachable, status != nil else {
+            if let local = services.localPause, local.paused {
+                var state = MenuBarState(
+                    kind: .paused(pendingCount: 0),
+                    asks: [],
+                    recentDecisions: [],
+                    headline: pausedHeadline(local.detail),
+                    paused: true
+                )
+                state.controlUnreachable = true
+                return state
+            }
             if services.controlStarting {
                 return MenuBarState(kind: .running, asks: [], recentDecisions: [], headline: "Starting Conduit…", paused: false)
             }

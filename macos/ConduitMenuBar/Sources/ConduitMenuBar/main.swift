@@ -205,6 +205,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         refreshAgentListenerHealth()
+        observeServiceTrees()
+    }
+
+    /// Records each launched service's process-tree members, so Stop all also
+    /// reaches a child that detached (setsid) after it was seen (F-04).
+    private func observeServiceTrees() {
+        let services = [controlApp, agentListener, daemon]
+        guard services.contains(where: \.hasProcesses) else { return }
+        let entries = KernelProcessTable().entries()
+        for service in services {
+            service.observeTree(entries)
+        }
     }
 
     private func applyPoll(status: ControlStatusResponse?, control: ControlState?, approvals: [ApprovalSummary]?) {
@@ -260,7 +272,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             agentListenerNeedsAttention: agentListenerNeedsAttention,
             stoppedByUser: stoppedByUser,
             controlStarting: controlApp.isRunning && !controlAppExternalAvailable,
-            controlAdoption: controlAdoption
+            controlAdoption: controlAdoption,
+            localPause: controlAppExternalAvailable || stoppedByUser ? nil : readLocalPause()
         )
         let state = MenuBarState.reduce(
             status: lastStatus,
@@ -277,6 +290,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             ConduitIcon.apply(state.kind, to: button)
         }
+    }
+
+    /// The pause flag `conduit pause --local` writes, read while Control does
+    /// not answer. The state root is resolved from this app's environment;
+    /// the CLI also inherits it (a login shell could still override
+    /// CONDUIT_STATE_DIR, which this cannot see).
+    private func readLocalPause() -> LocalPauseState {
+        let root = LocalPause.stateRoot(
+            environment: ProcessInfo.processInfo.environment,
+            home: NSHomeDirectory(),
+            workingDirectory: RepoLocator.repoRoot()
+        )
+        return LocalPause.read(path: LocalPause.flagPath(stateRoot: root))
     }
 
     private func focusPendingAsk() {
@@ -470,6 +496,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let wasPaused = model.state.paused
+        if wasPaused && model.state.controlUnreachable {
+            // Resume always goes through Control; there is no --local resume.
+            model.show("Conduit stays paused: Control is not running. Choose Restart services, then resume.", isError: true)
+            return
+        }
         model.busy = true
         Task {
             let message: String

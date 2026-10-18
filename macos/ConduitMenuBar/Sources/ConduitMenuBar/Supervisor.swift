@@ -25,6 +25,10 @@ final class ManagedProcess {
     private let onExit: () -> Void
     private var lastExitSummary: String?
     private var stopRequested = false
+    /// The launched trees' members (F-04), kept from launch so a child that
+    /// detaches with setsid after being observed is still stopped, and kept
+    /// after the root exits while anything of the tree is still alive.
+    private var trees = ProcessTreeSet()
     /// Exited on its own with a non-zero status (not stopped by Conduit or the
     /// person). Feeds the status item's error state.
     private(set) var crashed = false
@@ -86,27 +90,51 @@ final class ManagedProcess {
 
         try launched.run()
         process = launched
+        trees.launched(rootPid: launched.processIdentifier, table: KernelProcessTable())
     }
 
-    /// Stops the whole process tree. With `force`, anything in the tree still
-    /// alive after `grace` seconds gets SIGKILL: Stop all is a kill switch, so a
-    /// tool run that ignores SIGTERM must not outlive it.
+    /// Running, or a tree it launched may still have live members.
+    var hasProcesses: Bool {
+        isRunning || !trees.isEmpty
+    }
+
+    /// Records the trees' current members. Called on the supervisor's poll.
+    func observeTree(_ entries: [ProcessEntry]) {
+        trees.observe(entries, runningRootPid: isRunning ? process?.processIdentifier : nil)
+    }
+
+    /// Stops the whole process tree: SIGTERM to every member (ProcessTreeTracker:
+    /// descendants, the root's process group, and members seen earlier that
+    /// detached since), including what is left of trees whose root already
+    /// exited. With `force`, anything in them still alive after `grace`
+    /// seconds gets SIGKILL: Stop all is a kill switch, so a tool run that
+    /// ignores SIGTERM must not outlive it. Each signal is checked against the
+    /// process's start time, so a pid reused during the grace is skipped.
     func stop(force: Bool = false, grace: TimeInterval = 3) {
+        guard process != nil || !trees.isEmpty else {
+            return
+        }
+        let running = isRunning
+        if process != nil {
+            stopRequested = true
+            crashed = false
+            writeLogLine(force ? "Stop all requested for \(label)." : "Stop requested for \(label).")
+        }
+        let table = KernelProcessTable()
+        // The running root is this app's own unreaped child, so its pid
+        // cannot have been reused; terminate() makes a tracker for it if
+        // launch could not.
+        let termed = trees.terminate(runningRootPid: running ? process?.processIdentifier : nil, table: table)
+        if force && !termed.isEmpty {
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + grace) {
+                ProcessTreeSet.killSurvivors(termed, table: table)
+            }
+        }
         guard let process else {
             return
         }
-        stopRequested = true
-        crashed = false
-        writeLogLine(force ? "Stop all requested for \(label)." : "Stop requested for \(label).")
-        if process.isRunning {
-            let tree = ProcessTree.descendants(of: process.processIdentifier) + [process.processIdentifier]
-            ProcessTree.terminateChildren(of: process.processIdentifier)
+        if running {
             process.terminate()
-            if force {
-                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + grace) {
-                    ProcessTree.killSurvivors(tree)
-                }
-            }
         } else {
             logHandle?.closeFile()
             logHandle = nil
@@ -124,6 +152,9 @@ final class ManagedProcess {
     }
 }
 
+/// Parent-pid tree signalling for processes this app did not launch and so
+/// has no ProcessTreeTracker for (a previous run's listener, a timed-out CLI
+/// command). Services this app launched stop through ManagedProcess.stop.
 enum ProcessTree {
     static func terminateTree(of pid: Int32) {
         terminateChildren(of: pid)
@@ -133,20 +164,6 @@ enum ProcessTree {
     static func terminateChildren(of pid: Int32) {
         for child in childPids(of: pid) {
             terminateTree(of: child)
-        }
-    }
-
-    /// Every descendant pid, depth first, snapshotted before any signal so a
-    /// child re-parented to launchd after its parent dies is still covered.
-    static func descendants(of pid: Int32) -> [Int32] {
-        childPids(of: pid).flatMap { [$0] + descendants(of: $0) }
-    }
-
-    /// SIGKILL whatever in a snapshotted tree is still alive. Runs seconds
-    /// after the snapshot, so pid reuse in between is not a practical concern.
-    static func killSurvivors(_ pids: [Int32]) {
-        for pid in pids where kill(pid, 0) == 0 {
-            kill(pid, SIGKILL)
         }
     }
 

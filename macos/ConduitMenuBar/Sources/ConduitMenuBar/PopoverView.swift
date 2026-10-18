@@ -38,11 +38,22 @@ struct PopoverView: View {
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     // Stays enabled while Control is down: that is when the
-                    // pause falls back to `conduit pause --local`. With Control
-                    // unreachable the state is not paused, so the switch can
-                    // only pause, never resume.
+                    // pause falls back to `conduit pause --local`. Resuming
+                    // needs Control; with Control down a paused switch says so
+                    // instead of resuming.
                     .disabled(model.busy)
                     .help("Pause or resume everything (⌘P)")
+                }
+            }
+            if model.state.controlUnreachable {
+                HStack {
+                    Text("Conduit Control is not running. The pause was read from disk; resuming needs Control.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button("Restart services") { model.actions?.performFix(.restartServices) }
+                        .disabled(model.busy)
                 }
             }
             if isStopped {

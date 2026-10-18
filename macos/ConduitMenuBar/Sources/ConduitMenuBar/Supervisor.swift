@@ -220,9 +220,22 @@ enum PortListeners {
         )
     }
 
+    /// The error shown when the Control on 47831 reports another checkout
+    /// (ControlAdoption.otherCheckout). Names that checkout and every process
+    /// holding the port. Nothing is signalled.
+    static func otherCheckoutControlError(reportedRoot: String) -> AppError {
+        let holders = ((try? listenerPids(on: 47831)) ?? []).compactMap(ProcessProbe.snapshot(pid:)).map(\.summary)
+        let heldBy = holders.isEmpty ? "" : ": \(holders.joined(separator: ", "))"
+        return AppError(
+            "Port 47831 is in use by Conduit Control from another checkout (\(reportedRoot)), not this app's checkout (\(RepoLocator.repoRoot()))\(heldBy). "
+                + "Conduit is not using it and left it running. Quit the other Conduit app or stop that process, then choose Restart services."
+        )
+    }
+
     /// This app's pid, its checkout (only when it really is one) and its
     /// .app bundle (only when running from one, not from a bare build dir).
-    private static func appOwner() -> ListenerOwner {
+    /// The checkout is also what a Control must report to be adopted.
+    static func appOwner() -> ListenerOwner {
         let repoRoot = RepoLocator.repoRoot()
         let isCheckout = FileManager.default.fileExists(atPath: "\(repoRoot)/package.json")
         let bundle = Bundle.main.bundleURL

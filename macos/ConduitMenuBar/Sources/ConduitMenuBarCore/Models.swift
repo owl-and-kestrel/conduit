@@ -209,10 +209,24 @@ public struct ApprovalRequestedAction: Decodable, Equatable {
 public struct ControlStatusResponse: Decodable, Equatable {
     public let paused: Bool?
     public let capabilities: ControlCapabilities
+    /// Which checkout this Control runs from. nil from a Control that predates
+    /// the field (see ControlAdoption).
+    public let identity: ControlIdentity?
 
-    public init(paused: Bool?, capabilities: ControlCapabilities) {
+    public init(paused: Bool?, capabilities: ControlCapabilities, identity: ControlIdentity? = nil) {
         self.paused = paused
         self.capabilities = capabilities
+        self.identity = identity
+    }
+}
+
+/// `identity` on `GET /api/status` (src/app/control-identity.ts).
+public struct ControlIdentity: Decodable, Equatable {
+    /// The symlink-resolved checkout root the Control's code runs from.
+    public let checkoutRoot: String?
+
+    public init(checkoutRoot: String?) {
+        self.checkoutRoot = checkoutRoot
     }
 }
 

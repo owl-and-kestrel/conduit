@@ -34,8 +34,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     private lazy var updater = UpdateChecker()
     private var keyMonitor: Any?
+    /// Something answered `/api/status` on 47831 (this checkout's Control or not).
     private var controlAppExternalAvailable = false
+    /// The Control on 47831 is this checkout's (ControlAdoption) and supports
+    /// the agent handshake: the only Control this app uses. False makes it
+    /// "stale", so actions go through restartStaleControlApp.
     private var controlAppSupportsAgentHandshake = false
+    private var controlAdoption: ControlAdoption = .noAnswer
+    /// The other checkout last reported in an alert, so a poll every 2 s does
+    /// not raise the same alert again. Cleared once the port changes hands.
+    private var alertedOtherCheckoutRoot: String?
+    private lazy var appCheckoutRoot: String? = PortListeners.appOwner().checkoutRoot
     private var agentListenerNeedsAttention = false
     private var notifiedTransportIds = Set<String>()
     private var notifiedApprovalIds = Set<String>()
@@ -183,10 +192,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func poll() {
         guard !pollInFlight else { return }
         pollInFlight = true
+        let checkoutRoot = appCheckoutRoot
         Task {
             let status = try? await client.status()
-            let control: ControlState? = if status?.capabilities.pause == true { try? await client.control() } else { nil }
-            let approvals: [ApprovalSummary]? = if status != nil { try? await client.approvals() } else { nil }
+            // Nothing beyond /api/status is read from another checkout's Control.
+            let adopted = ControlAdoption.evaluate(status, appCheckoutRoot: checkoutRoot).adopted
+            let control: ControlState? = if adopted && status?.capabilities.pause == true { try? await client.control() } else { nil }
+            let approvals: [ApprovalSummary]? = if adopted { try? await client.approvals() } else { nil }
             await MainActor.run {
                 self.pollInFlight = false
                 self.applyPoll(status: status, control: control, approvals: approvals)
@@ -196,9 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyPoll(status: ControlStatusResponse?, control: ControlState?, approvals: [ApprovalSummary]?) {
-        controlAppExternalAvailable = status != nil
-        controlAppSupportsAgentHandshake = status?.capabilities.agentHandshake == true
-        lastStatus = status
+        applyControlStatus(status)
         lastControl = control
         if let approvals {
             lastApprovals = approvals
@@ -216,10 +226,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 deliveredAskIds.subtract(stale)
                 UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: stale.map { "conduit-approval-\($0)" })
             }
-        } else if status == nil {
+        } else if !controlAdoption.adopted {
             lastApprovals = []
         }
         recompute()
+    }
+
+    /// Adopts the Control on 47831 only when it reports this checkout
+    /// (ControlAdoption). Another checkout's is never used: it counts as
+    /// stale, so Restart services and every action that needs Control go
+    /// through restartStaleControlApp, which stops nothing that is not this
+    /// checkout's and reports who holds the port. On first seeing another
+    /// checkout's Control the app shows that report straight away.
+    private func applyControlStatus(_ status: ControlStatusResponse?) {
+        controlAdoption = ControlAdoption.evaluate(status, appCheckoutRoot: appCheckoutRoot)
+        controlAppExternalAvailable = status != nil
+        controlAppSupportsAgentHandshake = controlAdoption.adopted && status?.capabilities.agentHandshake == true
+        lastStatus = controlAdoption.adopted ? status : nil
+        guard case .otherCheckout(let reportedRoot) = controlAdoption else {
+            alertedOtherCheckoutRoot = nil
+            return
+        }
+        if alertedOtherCheckoutRoot != reportedRoot {
+            alertedOtherCheckoutRoot = reportedRoot
+            presentError("Not using the control app on port 47831.", PortListeners.otherCheckoutControlError(reportedRoot: reportedRoot))
+        }
     }
 
     private func recompute() {
@@ -228,7 +259,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             crashedServices: [controlApp, agentListener, daemon].filter(\.crashed).map(\.label),
             agentListenerNeedsAttention: agentListenerNeedsAttention,
             stoppedByUser: stoppedByUser,
-            controlStarting: controlApp.isRunning && !controlAppExternalAvailable
+            controlStarting: controlApp.isRunning && !controlAppExternalAvailable,
+            controlAdoption: controlAdoption
         )
         let state = MenuBarState.reduce(
             status: lastStatus,
@@ -284,6 +316,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if controlApp.isRunning {
             return controlAppExternalAvailable ? "running" : "starting"
         }
+        if case .otherCheckout(let reportedRoot) = controlAdoption {
+            return "another checkout's (\(reportedRoot))"
+        }
         if controlAppExternalAvailable {
             return controlAppSupportsAgentHandshake ? "available (started outside this app)" : "stale"
         }
@@ -293,6 +328,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func controlAppToggleTitle() -> String {
         if controlApp.isRunning {
             return "Stop Control App"
+        }
+        if case .otherCheckout = controlAdoption {
+            return "Control App From Another Checkout"
         }
         if controlAppExternalAvailable {
             return controlAppSupportsAgentHandshake ? "Control App Already Running" : "Control App Needs Restart"
@@ -308,9 +346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task {
             let status = try? await client.status()
             await MainActor.run {
-                self.controlAppExternalAvailable = status != nil
-                self.controlAppSupportsAgentHandshake = status?.capabilities.agentHandshake == true
-                self.lastStatus = status
+                self.applyControlStatus(status)
                 self.recompute()
                 completion?(status != nil)
             }
@@ -350,6 +386,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func decide(_ approvalId: String, _ decision: ApprovalDecision, channel: DecisionChannel) {
         guard !model.deciding.contains(approvalId) else { return }
+        // Asks come only from this checkout's Control; if the port changed
+        // hands since, decide nothing rather than answer another checkout's.
+        guard controlAdoption.adopted else {
+            model.show("Nothing was decided: the control app on port 47831 is not this checkout's.", isError: true)
+            poll()
+            return
+        }
         model.deciding.insert(approvalId)
         inFlightDecisions += 1
         recompute()
@@ -909,19 +952,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func restartStaleControlApp(completion: ((Bool) -> Void)? = nil) {
         do {
-            let pids = try PortListeners.listenerPids(on: 47831)
-            if pids.isEmpty {
+            // One lsof: stop only a control app that is ours; another
+            // checkout's (or an installed Conduit's) is left running and
+            // reported. Exited pids are in neither list.
+            let listeners = try PortListeners.ownedListeners(on: 47831, service: .control)
+            if !listeners.foreign.isEmpty {
+                throw PortListeners.foreignListenerError(port: 47831, listeners.foreign)
+            }
+            if listeners.ours.isEmpty {
                 controlAppExternalAvailable = false
                 controlAppSupportsAgentHandshake = false
                 startControlApp()
                 waitForControlAppHealth(completion: completion)
                 return
-            }
-            // Stop only a control app that is ours; another checkout's (or an
-            // installed Conduit's) is left running and reported.
-            let listeners = try PortListeners.ownedListeners(on: 47831, service: .control)
-            if !listeners.foreign.isEmpty {
-                throw PortListeners.foreignListenerError(port: 47831, listeners.foreign)
             }
 
             for pid in listeners.ours {

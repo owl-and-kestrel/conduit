@@ -30,19 +30,24 @@ public struct ServiceSnapshot: Equatable {
     public var stoppedByUser: Bool
     /// The supervisor launched Control and it has not answered yet.
     public var controlStarting: Bool
+    /// Whether the Control that answered is this checkout's. One that is not
+    /// is never used (the app passes no status for it) and is named here.
+    public var controlAdoption: ControlAdoption
 
     public init(
         controlReachable: Bool,
         crashedServices: [String] = [],
         agentListenerNeedsAttention: Bool = false,
         stoppedByUser: Bool = false,
-        controlStarting: Bool = false
+        controlStarting: Bool = false,
+        controlAdoption: ControlAdoption = .thisCheckout
     ) {
         self.controlReachable = controlReachable
         self.crashedServices = crashedServices
         self.agentListenerNeedsAttention = agentListenerNeedsAttention
         self.stoppedByUser = stoppedByUser
         self.controlStarting = controlStarting
+        self.controlAdoption = controlAdoption
     }
 }
 
@@ -69,8 +74,9 @@ public struct MenuBarState: Equatable {
     }
 
     /// The reducer. Precedence, highest first:
-    /// 1. Control unreachable while not stopped on purpose: error. Without
-    ///    Control the menu bar cannot know whether anything is paused or waiting.
+    /// 1. Control unreachable, or not this checkout's (ControlAdoption), while
+    ///    not stopped on purpose: error. Without this checkout's Control the
+    ///    menu bar cannot know whether anything is paused or waiting.
     /// 2. Paused (global flag, or stopped by the person): nothing executes, and
     ///    that must always be visible. Pending asks still show as a count.
     /// 3. Needs you: pending asks win over running (spec §3.1).
@@ -104,6 +110,20 @@ public struct MenuBarState: Equatable {
                 paused: true,
                 stopped: true
             )
+        }
+
+        // A Control on 47831 that is not this checkout's is not used. Restart
+        // services replaces it only if its process is this checkout's;
+        // otherwise the app reports who holds the port and leaves it running.
+        switch services.controlAdoption {
+        case .otherCheckout(let reportedRoot):
+            let reason = "Port 47831 is held by Conduit Control from another checkout (\(reportedRoot)), so this app is not using it."
+            return MenuBarState(kind: .error(reason: reason, fix: .restartServices), asks: [], recentDecisions: [], headline: reason, paused: false)
+        case .unverified:
+            let reason = "Conduit Control on port 47831 does not say which checkout it is from, so this app is not using it. Restart services to replace it."
+            return MenuBarState(kind: .error(reason: reason, fix: .restartServices), asks: [], recentDecisions: [], headline: reason, paused: false)
+        case .noAnswer, .thisCheckout:
+            break
         }
 
         guard services.controlReachable, status != nil else {

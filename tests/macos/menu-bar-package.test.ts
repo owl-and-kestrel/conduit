@@ -11,6 +11,7 @@ describe('macOS menu-bar package scaffold', () => {
     await expectExists('macos/ConduitMenuBar/Sources/ConduitMenuBarCore/ControlAPI.swift');
     await expectExists('macos/ConduitMenuBar/Tests/ConduitMenuBarCoreTests/MenuBarStateTests.swift');
     await expectExists('macos/ConduitMenuBar/Tests/ConduitMenuBarCoreTests/AllowOnceTests.swift');
+    await expectExists('macos/ConduitMenuBar/Tests/ConduitMenuBarCoreTests/ControlAdoptionTests.swift');
     await expectExists('macos/ConduitMenuBar/Assets/ConduitIcon.svg');
     await expectExists('script/build_and_run.sh');
     await expectExists('script/package_dmg.sh');
@@ -74,6 +75,16 @@ describe('macOS menu-bar package scaffold', () => {
     expect(main).toContain('ownedListeners(on: 3333, service: .agentListener)');
     expect(main).toContain('ListenerOwnership.classify');
     expect(main).not.toContain('dist/cli/index.js');
+    // A Control already on 47831 is adopted only when it reports this checkout;
+    // nothing but /api/status is read from another checkout's, and it is reported.
+    expect(main).toContain('ControlAdoption.evaluate(status, appCheckoutRoot:');
+    expect(main).toContain('if adopted { try? await client.approvals() }');
+    expect(main).toContain('guard controlAdoption.adopted else');
+    expect(main).toContain('otherCheckoutControlError(reportedRoot:');
+    // Review F-02 (d448c788): restartStaleControlApp lists the port once.
+    const restart = sliceBetween(main, 'private func restartStaleControlApp', 'private func waitForPortToClear');
+    expect(restart).not.toContain('listenerPids(');
+    expect(restart.split('ownedListeners(on: 47831, service: .control)').length - 1).toBe(1);
     expect(main).toContain('agent-listener.log');
     expect(main).toContain('"listen", "--project"');
     expect(main).toContain('standardOutput = handle');
@@ -323,6 +334,14 @@ async function expectExists(file: string): Promise<void> {
 }
 
 /** Every Swift source of the menu-bar app and its core library, concatenated. */
+function sliceBetween(text: string, start: string, end: string): string {
+  const from = text.indexOf(start);
+  const to = text.indexOf(end, from);
+  expect(from, start).toBeGreaterThanOrEqual(0);
+  expect(to, end).toBeGreaterThan(from);
+  return text.slice(from, to);
+}
+
 async function swiftSources(): Promise<string> {
   const roots = [
     'macos/ConduitMenuBar/Sources/ConduitMenuBar',

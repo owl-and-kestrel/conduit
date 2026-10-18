@@ -21,6 +21,7 @@ import { executeApprovedReview, executeRequestFromUnknown } from '../daemon/exec
 import { createDiagnosticBundle } from '../diagnostics/diagnostic-bundle.js';
 import { getPauseState } from '../state/pause-state.js';
 import { getControlStatus, pauseAll, resumeAll, stopAll } from './control-operations.js';
+import { getControlIdentity } from './control-identity.js';
 import { renderAppHtml, renderAppJs } from './control-panel-ui.js';
 import { CONTROL_PANEL_DEFAULT_PORT, isLoopbackHostname, refuseNonLocalRequest } from '../util/loopback-guard.js';
 
@@ -108,6 +109,9 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         mode: 'Compliance',
         paused: pause.paused,
         stateRoot: getStateRoot(),
+        // Which checkout this Control runs from. The menu-bar app adopts a
+        // Control already on its port only when this is its own checkout.
+        identity: getControlIdentity(),
         exactEnvelopeParsing: true,
         embeddedBlockParsing: false,
         clipboardWatcher: 'available',

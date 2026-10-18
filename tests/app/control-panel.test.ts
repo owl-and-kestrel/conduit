@@ -1,7 +1,9 @@
+import { realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { startControlPanel, type ControlPanelHandle } from '../../src/app/control-panel.js';
 import { createApprovalRequest } from '../../src/approvals/approval-store.js';
@@ -64,6 +66,9 @@ describe('control panel app', () => {
         approvals: true
       }
     });
+    // The menu-bar app adopts a Control on its port only when this names its
+    // own checkout: the symlink-resolved root this code runs from.
+    expect(status.identity).toEqual({ checkoutRoot: realpathSync(fileURLToPath(new URL('../..', import.meta.url))) });
   });
 
   it('serves a redacted diagnostic bundle for bug reports', async () => {

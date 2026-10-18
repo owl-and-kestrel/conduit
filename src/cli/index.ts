@@ -300,16 +300,21 @@ approvalsCommand.command('show')
   });
 
 for (const decision of ['approve', 'deny'] as const) {
-  approvalsCommand.command(decision)
+  const command = approvalsCommand.command(decision)
     .description(decision === 'approve'
       ? 'Approve a pending approval. An untrusted review runs once, read-only, like Approve once in the panel.'
       : 'Deny a pending approval.')
     .argument('<approvalId>', 'approval id')
-    .option('--reason <text>', 'decision reason recorded on the approval')
+    .option('--reason <text>', 'decision reason recorded on the approval');
+  if (decision === 'approve') {
+    command.option('--for-this-chat', 'Allow for this chat: the same exact shell command or file write in this chat runs without asking again. Ends when the chat is revoked or Conduit restarts.', false);
+  }
+  command
     .option('--url <url>', 'Conduit Control URL')
     .option('--json', 'print the raw API response', false)
-    .action(async (approvalId: string, options: { reason?: string; url?: string; json: boolean }) => {
-      const result = await new ControlClient({ url: options.url }).decideApproval(approvalId, decision, options.reason);
+    .action(async (approvalId: string, options: { reason?: string; forThisChat?: boolean; url?: string; json: boolean }) => {
+      const result = await new ControlClient({ url: options.url })
+        .decideApproval(approvalId, decision, options.reason, { forThisChat: options.forThisChat === true });
       if (options.json) {
         console.log(JSON.stringify(result, null, 2));
         return;
@@ -321,6 +326,46 @@ for (const decision of ['approve', 'deny'] as const) {
         else if (result.execution.rendered) console.log(result.execution.rendered);
       }
     });
+}
+
+const settingsCommand = program.command('settings')
+  .description('Show or change Conduit settings (same API as the panel and the menu-bar Settings window).');
+
+settingsCommand.command('show')
+  .description('Show the current settings.')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--json', 'print the raw API response', false)
+  .action(async (options: { url?: string; json: boolean }) => {
+    const result = await new ControlClient({ url: options.url }).settings();
+    console.log(options.json ? JSON.stringify(result, null, 2) : formatSettings(result.settings));
+  });
+
+settingsCommand.command('set')
+  .description('Change settings. Only the options you pass change.')
+  .option('--return-approves-shell-without-details <on|off>', 'Return approves shell commands without opening details (default off: Return opens the details first)')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--json', 'print the raw API response', false)
+  .action(async (options: { returnApprovesShellWithoutDetails?: string; url?: string; json: boolean }) => {
+    const update: Record<string, boolean> = {};
+    if (options.returnApprovesShellWithoutDetails !== undefined) {
+      update.returnApprovesShellWithoutDetails = parseOnOff(options.returnApprovesShellWithoutDetails, '--return-approves-shell-without-details');
+    }
+    if (Object.keys(update).length === 0) {
+      throw new Error('Nothing to change. Pass --return-approves-shell-without-details on|off.');
+    }
+    const result = await new ControlClient({ url: options.url }).updateSettings(update);
+    console.log(options.json ? JSON.stringify(result, null, 2) : formatSettings(result.settings));
+  });
+
+function parseOnOff(value: string, flag: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (['on', 'true', 'yes', '1'].includes(normalized)) return true;
+  if (['off', 'false', 'no', '0'].includes(normalized)) return false;
+  throw new Error(`${flag} takes on or off, got: ${value}`);
+}
+
+function formatSettings(settings: any): string {
+  return `Return approves shell commands without opening details: ${settings?.returnApprovesShellWithoutDetails ? 'on' : 'off'}`;
 }
 
 const runsCommand = program.command('runs')

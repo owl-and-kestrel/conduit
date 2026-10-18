@@ -12,12 +12,14 @@ enum Fixtures {
         createdAt: String = "2026-10-18T06:00:00.000Z",
         executionStatus: String? = nil,
         executionFinishedAt: String? = nil,
-        decidedBy: String? = nil
+        decidedBy: String? = nil,
+        sessionId: String? = nil
     ) -> ApprovalSummary {
         ApprovalSummary(
             approvalId: id,
             status: status,
             policyReason: "Profile requires confirmation.",
+            sessionId: sessionId,
             createdAt: createdAt,
             decidedBy: decidedBy,
             executionStatus: executionStatus,

@@ -108,7 +108,7 @@ struct PopoverView: View {
                     }
                 }
                 .frame(maxHeight: 340)
-                Text("↑↓ select · Space details · Return allow once · ⌘⌫ deny · Esc close")
+                Text("↑↓ select · Space details · Return allow once · ⌘Return allow for this chat · ⌘⌫ deny · Esc close")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -266,6 +266,11 @@ private struct AskRow: View {
             HStack(spacing: 8) {
                 Button(ask.isReview ? "Approve once" : "Allow once") { model.actions?.decide(ask.approvalId, .approve) }
                     .disabled(deciding)
+                if AllowForThisChat.isOffered(for: ask) {
+                    Button("Allow for this chat") { model.actions?.decideForThisChat(ask.approvalId) }
+                        .disabled(deciding)
+                        .help("Also allow this exact \(ask.action.tool == "shell.run" ? "command" : "file write") again in this chat, until the chat is revoked or Conduit restarts.")
+                }
                 Button("Deny") { model.actions?.decide(ask.approvalId, .deny) }
                     .disabled(deciding)
                 Spacer()

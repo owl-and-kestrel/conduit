@@ -217,6 +217,8 @@ h4 { margin: 0 0 8px; font-size: 11.5px; letter-spacing: 0.06em; text-transform:
 .consent-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 13px 22px 13px 24px; border-top: 1px solid var(--line); background: var(--surface-2); }
 .consent-foot .decide { display: flex; gap: 8px; margin-left: auto; }
 .consent-foot .btn { min-height: 38px; }
+.setting-row { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; color: var(--ink-2); font-size: 13px; }
+.setting-row input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 .history { display: grid; }
 .history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 14px; align-items: center; padding: 11px 18px; border-bottom: 1px solid var(--line); }
 .history-row:last-child { border-bottom: 0; }
@@ -387,6 +389,7 @@ const BODY = `<div class="demo-banner" id="demoBanner" hidden>
     </section>
 
     <section id="approvalsView" class="hidden">
+      <label class="setting-row" for="returnApprovesShell"><input type="checkbox" id="returnApprovesShell"><span>Return approves shell commands without opening details</span></label>
       <div id="approvalsTable"></div>
       <div class="panel" id="historyPanel" hidden>
         <div class="panel-head"><div><h2>Recent decisions</h2><div class="subtle">Every decision records where it was made.</div></div></div>
@@ -509,7 +512,7 @@ const PROFILE_HINTS = {
 };
 const config = readConfig();
 const DEMO = new URLSearchParams(location.search).has('demo');
-const state = { status: null, control: null, bridge: null, sessions: [], approvals: [], runs: [], view: 'overview' };
+const state = { status: null, control: null, bridge: null, sessions: [], approvals: [], runs: [], settings: {}, openDetails: new Set(), view: 'overview' };
 const $ = (id) => document.getElementById(id);
 let demoStore = null;
 let toastTimer = null;
@@ -545,17 +548,18 @@ function setStatus(text, kind) {
 let lastSignature = '';
 
 async function refresh(onlyIfChanged) {
-  const [status, control, bridge, sessions, approvals, runs] = await Promise.all([
+  const [status, control, bridge, sessions, approvals, runs, settings] = await Promise.all([
     api('/api/status'),
     api('/api/control'),
     fetchBridgeHealth(),
     api('/api/sessions'),
     api('/api/approvals'),
-    api('/api/runs')
+    api('/api/runs'),
+    api('/api/settings')
   ]);
   // Background polls skip re-rendering when nothing changed, so open details
   // and scroll positions are not disturbed while the user is reading.
-  const signature = JSON.stringify([status, control, bridge, sessions, approvals, runs]);
+  const signature = JSON.stringify([status, control, bridge, sessions, approvals, runs, settings]);
   if (onlyIfChanged && signature === lastSignature) return;
   lastSignature = signature;
   state.status = status;
@@ -564,6 +568,7 @@ async function refresh(onlyIfChanged) {
   state.sessions = sessions.sessions;
   state.approvals = approvals.approvals;
   state.runs = runs.runs;
+  state.settings = settings.settings || {};
   render();
 }
 
@@ -595,6 +600,7 @@ function render() {
   renderApprovals();
   renderRuns();
   renderPause();
+  $('returnApprovesShell').checked = Boolean(state.settings.returnApprovesShellWithoutDetails);
 }
 
 function renderPause() {
@@ -715,8 +721,8 @@ function approvalCardHtml(approval) {
       '<div class="consent-meta mono">' + escapeHtml(approval.approvalId) + ' / ' + escapeHtml(ago(approval.createdAt)) + (approval.projectRoot ? ' / root ' + escapeHtml(approval.projectRoot) : '') + '</div>' +
     '</header>' +
     '<div class="consent-grid">' + approvalReviewHtml(approval) + approvalDetailsHtml(approval) + '</div>' +
-    (isReview(approval) ? '<p class="policy-note">' + SHIELD_ICON + '<span>Approve once runs under read-only local policy. It does not create a trusted session or widen future policy.</span></p>' : '<p class="policy-note">' + SHIELD_ICON + '<span>' + escapeHtml(approval.policyReason || 'This action requires confirmation under the session profile.') + ' Approving allows this one action only.</span></p>') +
-    '<details><summary>Raw request</summary><pre>' + escapeHtml(JSON.stringify(approval.action?.args || {}, null, 2)) + '</pre></details>' +
+    (isReview(approval) ? '<p class="policy-note">' + SHIELD_ICON + '<span>Approve once runs under read-only local policy. It does not create a trusted session or widen future policy.</span></p>' : '<p class="policy-note">' + SHIELD_ICON + '<span>' + escapeHtml(approval.policyReason || 'This action requires confirmation under the session profile.') + ' Allow once allows this one action only.' + (canAllowForThisChat(approval) ? ' Allow for this chat also allows this exact ' + (approval.action?.tool === 'shell.run' ? 'command' : 'file write') + ' again in this chat, until the chat is revoked or Conduit restarts.' : '') + '</span></p>') +
+    '<details data-details-for="' + escapeHtml(approval.approvalId) + '"' + (state.openDetails.has(approval.approvalId) ? ' open' : '') + '><summary>Details</summary><pre>' + escapeHtml(JSON.stringify(approval.action?.args || {}, null, 2)) + '</pre></details>' +
     '<footer class="consent-foot"><div>' + approvalStateHtml(approval) + '</div><div class="decide">' + approvalActionsHtml(approval) + '</div></footer>' +
   '</article>';
 }
@@ -738,7 +744,28 @@ function approvalRequestHtml(approval) {
 }
 
 function approvalButtonLabel(approval) {
-  return isReview(approval) ? 'Approve once' : 'Approve';
+  return isReview(approval) ? 'Approve once' : 'Allow once';
+}
+
+// "Allow for this chat" (remembered for this session only): only for a
+// confirmation from a chat, for an exact shell command or a single-file write.
+// The server re-checks all of this; this only decides whether to offer it.
+function canAllowForThisChat(approval) {
+  if (isReview(approval) || !approval.sessionId) return false;
+  const args = approval.action?.args || {};
+  if (approval.action?.tool === 'shell.run') return typeof args.command === 'string' && args.command.length > 0;
+  if (approval.action?.tool === 'file.write') return typeof args.path === 'string' && args.path.length > 0;
+  return false;
+}
+
+// Return on a shell command (Jon 2026-10-18): with its details closed, Return
+// opens them instead of approving; with them open, Return approves. The
+// "Return approves shell commands without opening details" setting turns this
+// off. Mouse clicks are not affected.
+function returnKeyAction(input) {
+  if (input.tool !== 'shell.run') return 'approve';
+  if (input.detailsOpen || input.bypass) return 'approve';
+  return 'expand';
 }
 
 function approvalStateHtml(approval) {
@@ -817,6 +844,7 @@ function approvalActionsHtml(approval) {
     return '';
   }
   return '<button class="btn danger" data-deny="' + encodeURIComponent(approval.approvalId) + '" type="button">Deny</button>' +
+    (canAllowForThisChat(approval) ? '<button class="btn" data-approve="' + encodeURIComponent(approval.approvalId) + '" data-remember="session" type="button">Allow for this chat</button>' : '') +
     '<button class="btn primary" data-approve="' + encodeURIComponent(approval.approvalId) + '" type="button">' + approvalButtonLabel(approval) + '</button>';
 }
 
@@ -910,11 +938,16 @@ document.addEventListener('click', (event) => guarded(async () => {
 
   if (data.approve) {
     target.disabled = true;
+    const forThisChat = data.remember === 'session';
     const result = await api('/api/approvals/' + data.approve + '/approve', {
       method: 'POST',
-      body: JSON.stringify({ reason: 'Approved from Conduit Control.' })
+      body: JSON.stringify(forThisChat
+        ? { reason: 'Allowed for this chat from Conduit Control.', remember: 'session' }
+        : { reason: 'Approved from Conduit Control.' })
     });
-    if (result.execution?.runId && result.copiedToClipboard) {
+    if (forThisChat) {
+      setStatus('Allowed for this chat. The same exact action runs without asking until the chat is revoked or Conduit restarts.');
+    } else if (result.execution?.runId && result.copiedToClipboard) {
       setStatus('Approved, executed run ' + result.execution.runId + ', and copied results to clipboard.');
     } else if (result.execution?.runId) {
       setStatus('Approved and executed run ' + result.execution.runId + '.');
@@ -944,6 +977,53 @@ document.addEventListener('click', (event) => guarded(async () => {
   }
 }));
 
+// Return on an approve button for a shell command whose details are closed
+// opens the details instead (see returnKeyAction). Capture phase, so it runs
+// before the button turns the key into a click.
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || !event.target || !event.target.closest) return;
+  const button = event.target.closest('[data-approve]');
+  if (!button) return;
+  const approvalId = decodeURIComponent(button.dataset.approve);
+  const approval = state.approvals.find((item) => item.approvalId === approvalId);
+  const card = button.closest('.consent');
+  const details = card ? card.querySelector('details[data-details-for]') : null;
+  const action = returnKeyAction({
+    tool: approval?.action?.tool,
+    detailsOpen: Boolean(details && details.open),
+    bypass: Boolean(state.settings.returnApprovesShellWithoutDetails)
+  });
+  if (action === 'expand') {
+    event.preventDefault();
+    event.stopPropagation();
+    if (details) details.open = true;
+    setStatus('Details opened. Check the command, then press Return again to approve it.');
+  }
+}, true);
+// Keep a card's details open across re-renders (toggle does not bubble).
+document.addEventListener('toggle', (event) => {
+  const id = event.target && event.target.dataset ? event.target.dataset.detailsFor : undefined;
+  if (!id) return;
+  if (event.target.open) state.openDetails.add(id); else state.openDetails.delete(id);
+}, true);
+// The same call as 'conduit settings set' and the menu-bar Settings window.
+$('returnApprovesShell').addEventListener('change', (event) => guarded(async () => {
+  const checkbox = event.target;
+  checkbox.disabled = true;
+  try {
+    const result = await api('/api/settings', {
+      method: 'POST',
+      body: JSON.stringify({ returnApprovesShellWithoutDetails: checkbox.checked })
+    });
+    state.settings = result.settings || {};
+    setStatus(state.settings.returnApprovesShellWithoutDetails
+      ? 'Return now approves shell commands without opening details.'
+      : 'Return now opens the details of a shell command before it can approve it.');
+  } finally {
+    checkbox.checked = Boolean(state.settings.returnApprovesShellWithoutDetails);
+    checkbox.disabled = false;
+  }
+}));
 $('refresh').addEventListener('click', () => guarded(async () => {
   await refresh();
   setStatus('Refreshed.');
@@ -969,8 +1049,11 @@ $('pauseToggle').addEventListener('click', () => guarded(async () => {
     }
     setStatus(wasPaused ? 'Resumed. Trusted requests run again.' : 'Paused. Nothing runs until you resume.');
   } finally {
-    button.disabled = false;
-    await refresh();
+    try {
+      await refresh();
+    } finally {
+      button.disabled = false;
+    }
   }
 }));
 $('reportBug').addEventListener('click', () => guarded(async () => {
@@ -1121,6 +1204,7 @@ function demoState() {
   const root = '~/projects/field-notes';
   demoStore = {
     counter: 0,
+    settings: { returnApprovesShellWithoutDetails: false },
     control: { paused: false, pause: { paused: false }, liveSessions: 2, pausedSessions: [], pendingApprovals: 2 },
     status: {
       status: 'ok',
@@ -1267,6 +1351,10 @@ async function demoApi(path, options = {}) {
   if (path === '/api/sessions' && method === 'GET') return { sessions: store.sessions };
   if (path === '/api/approvals') return { approvals: store.approvals };
   if (path === '/api/runs') return { runs: store.runs };
+  if (path === '/api/settings') {
+    if (method === 'POST') Object.assign(store.settings, body);
+    return { settings: store.settings };
+  }
   if (path === '/api/diagnostics') {
     return { bundle: { schema: 'conduit.diagnostic-bundle.v1', demo: true, app: { version: '0.0.1' }, services: { controlPanel: { status: 'ok' } }, state: { redaction: { excludesClipboardContents: true, excludesRequestPayloads: true, excludesSessionNonces: true, excludesApiKeys: true } }, sessions: store.sessions.map((s) => ({ sessionId: s.sessionId, state: s.state, hasCurrentNonce: true })) } };
   }

@@ -8,6 +8,7 @@ import {
   type ApprovalRecord,
   type ConfirmationRequest
 } from '../approvals/approval-store.js';
+import { addSessionGrant, findSessionGrant } from '../approvals/session-grants.js';
 import type { PolicyDecision } from '../policy/policy-engine.js';
 import { evaluateActionPolicy } from '../policy/policy-engine.js';
 import type { ToolAction, ToolResult } from '../protocol/schemas.js';
@@ -37,7 +38,13 @@ export interface ExecuteActionsInput {
  * object form lets the shared approval path report who decided (`decidedBy`)
  * so every decision in `policy-decisions.jsonl` carries one.
  */
-export type ConfirmationOutcome = boolean | { approved: boolean; decidedBy?: string; approvalId?: string };
+export type ConfirmationOutcome = boolean | {
+  approved: boolean;
+  decidedBy?: string;
+  approvalId?: string;
+  /** The person chose "Allow for this chat": remember it for this session only. */
+  remember?: 'session';
+};
 export type ConfirmFn = (request: ConfirmationRequest) => Promise<ConfirmationOutcome>;
 
 export async function executeActions(input: ExecuteActionsInput): Promise<ToolResult[]> {
@@ -167,6 +174,18 @@ async function handlePolicyDecision(
       return null;
     }
 
+    // "Allow for this chat": an earlier approval in this same session covers
+    // exactly this action. Policy already said "ask", so this never lifts a deny.
+    const grant = await findSessionGrant({ sessionId: input.sessionId, action, projectRoot: input.projectRoot });
+    if (grant) {
+      await logConfirmation(input, action, {
+        approved: true,
+        decidedBy: `grant:${grant.approvalId ?? 'session'}`,
+        reason: 'Allowed for this chat.'
+      });
+      return null;
+    }
+
     const prompt = [
       '',
       `[Conduit] The assistant requests to run ${action.tool}.`,
@@ -186,6 +205,15 @@ async function handlePolicyDecision(
     }));
     await logConfirmation(input, action, outcome);
     if (outcome.approved) {
+      if (outcome.remember === 'session') {
+        // Remembered only for this session, in this process's memory.
+        await addSessionGrant({
+          sessionId: input.sessionId,
+          action,
+          projectRoot: input.projectRoot,
+          approvalId: outcome.approvalId
+        });
+      }
       return null;
     }
 
@@ -209,21 +237,23 @@ async function handlePolicyDecision(
   };
 }
 
-function normalizeOutcome(outcome: ConfirmationOutcome): { approved: boolean; decidedBy?: string; approvalId?: string } {
+type NormalizedOutcome = Exclude<ConfirmationOutcome, boolean>;
+
+function normalizeOutcome(outcome: ConfirmationOutcome): NormalizedOutcome {
   return typeof outcome === 'boolean' ? { approved: outcome } : outcome;
 }
 
 async function logConfirmation(
   input: { runDir: string; turn: number },
   action: ToolAction,
-  outcome: { approved: boolean; decidedBy?: string; approvalId?: string }
+  outcome: NormalizedOutcome & { reason?: string }
 ): Promise<void> {
   await appendJsonl(input.runDir, 'policy-decisions.jsonl', {
     turn: input.turn,
     actionId: action.id,
     tool: action.tool,
     decision: outcome.approved ? 'allow' : 'deny',
-    reason: outcome.approved ? 'Confirmed.' : 'Not confirmed.',
+    reason: outcome.reason ?? (outcome.approved ? 'Confirmed.' : 'Not confirmed.'),
     decidedBy: outcome.decidedBy ?? 'confirm-callback',
     ...(outcome.approvalId ? { approvalId: outcome.approvalId } : {}),
     timestamp: new Date().toISOString()
@@ -256,7 +286,8 @@ async function requestSharedApproval(request: ConfirmationRequest): Promise<Conf
     return {
       approved: decided.status === 'approved',
       approvalId: decided.approvalId,
-      ...(decided.decidedBy ? { decidedBy: decided.decidedBy } : {})
+      ...(decided.decidedBy ? { decidedBy: decided.decidedBy } : {}),
+      ...(decided.status === 'approved' && decided.remember === 'session' ? { remember: 'session' as const } : {})
     };
   } finally {
     closeTerminalPrompt?.();

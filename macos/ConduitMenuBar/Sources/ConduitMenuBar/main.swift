@@ -199,8 +199,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let adopted = ControlAdoption.evaluate(status, appCheckoutRoot: checkoutRoot).adopted
             let control: ControlState? = if adopted && status?.capabilities.pause == true { try? await client.control() } else { nil }
             let approvals: [ApprovalSummary]? = if adopted { try? await client.approvals() } else { nil }
+            let settings: ConduitSettings? = if adopted && status?.capabilities.settings == true { try? await client.settings() } else { nil }
             await MainActor.run {
                 self.pollInFlight = false
+                // Unknown settings fall back to the cautious default (off).
+                self.model.settingsSupported = settings != nil
+                self.model.returnApprovesShellWithoutDetails = settings?.returnApprovesShellWithoutDetails ?? false
                 self.applyPoll(status: status, control: control, approvals: approvals)
             }
         }
@@ -410,7 +414,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Decisions (decidedBy: menubar | notification)
 
-    private func decide(_ approvalId: String, _ decision: ApprovalDecision, channel: DecisionChannel) {
+    private func decide(_ approvalId: String, _ decision: ApprovalDecision, channel: DecisionChannel, forThisChat: Bool = false) {
         guard !model.deciding.contains(approvalId) else { return }
         // Asks come only from this checkout's Control; if the port changed
         // hands since, decide nothing rather than answer another checkout's.
@@ -427,8 +431,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let isError: Bool
             let settledStatus: String?
             do {
-                let response = try await client.decide(approvalId: approvalId, decision, channel: channel)
-                message = decision == .approve ? response.statusMessage : "Denied. Nothing ran."
+                let response = try await client.decide(approvalId: approvalId, decision, channel: channel, forThisChat: forThisChat)
+                message = decision == .approve
+                    ? (forThisChat ? "Allowed for this chat. The same exact action runs without asking until the chat is revoked or Conduit restarts." : response.statusMessage)
+                    : "Denied. Nothing ran."
                 isError = false
                 settledStatus = decision == .approve ? "approved" : "denied"
             } catch let error as ControlAPIError {
@@ -1135,6 +1141,33 @@ extension AppDelegate: MenuBarActions {
     func decide(_ approvalId: String, _ decision: ApprovalDecision) {
         // Popover clicks, its keys and the hotkey are all the menu bar.
         decide(approvalId, decision, channel: .menubar)
+    }
+
+    func decideForThisChat(_ approvalId: String) {
+        decide(approvalId, .approve, channel: .menubar, forThisChat: true)
+    }
+
+    /// The same call as `conduit settings set` and the web panel's checkbox.
+    func setReturnApprovesShellWithoutDetails(_ value: Bool) {
+        guard controlAdoption.adopted else {
+            model.show("Settings were not changed: the control app on port 47831 is not this checkout's.", isError: true)
+            return
+        }
+        Task {
+            do {
+                let settings = try await client.setReturnApprovesShellWithoutDetails(value)
+                await MainActor.run {
+                    self.model.returnApprovesShellWithoutDetails = settings.returnApprovesShellWithoutDetails
+                    self.model.show(settings.returnApprovesShellWithoutDetails
+                        ? "Return now allows shell commands without opening details."
+                        : "Return now opens a shell command's details before it can allow it.", isError: false)
+                }
+            } catch {
+                await MainActor.run {
+                    self.model.show((error as? ControlAPIError)?.userMessage ?? error.localizedDescription, isError: true)
+                }
+            }
+        }
     }
 }
 

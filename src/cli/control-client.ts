@@ -19,6 +19,8 @@ export const CONTROL_CLI_ROUTES = {
   'approvals show': { method: 'GET', path: '/api/approvals/:id' },
   'approvals approve': { method: 'POST', path: '/api/approvals/:id/approve' },
   'approvals deny': { method: 'POST', path: '/api/approvals/:id/deny' },
+  'settings show': { method: 'GET', path: '/api/settings' },
+  'settings set': { method: 'POST', path: '/api/settings' },
   'runs list': { method: 'GET', path: '/api/runs' },
   'runs result': { method: 'GET', path: '/api/runs/:id/result' },
   'app status': { method: 'GET', path: '/api/status' },
@@ -96,11 +98,21 @@ export class ControlClient {
     return this.call('approvals show', { id: approvalId });
   }
 
-  decideApproval(approvalId: string, decision: 'approve' | 'deny', reason?: string): Promise<any> {
+  /** `forThisChat` is "Allow for this chat": remembered for this session only. */
+  decideApproval(approvalId: string, decision: 'approve' | 'deny', reason?: string, options: { forThisChat?: boolean } = {}): Promise<any> {
     return this.call(decision === 'approve' ? 'approvals approve' : 'approvals deny', { id: approvalId }, {
       decidedBy: CLI_ACTOR,
-      ...(reason ? { reason } : {})
+      ...(reason ? { reason } : {}),
+      ...(options.forThisChat ? { remember: 'session' } : {})
     });
+  }
+
+  settings(): Promise<any> {
+    return this.call('settings show');
+  }
+
+  updateSettings(update: Record<string, boolean>): Promise<any> {
+    return this.call('settings set', {}, update);
   }
 
   listRuns(): Promise<any> {

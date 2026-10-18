@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { renderAppJs } from '../../src/app/control-panel-ui.js';
@@ -50,7 +51,7 @@ const EXEMPTIONS: Record<string, { reason: string; inProcessVerb?: string }> = {
 };
 
 const execFileAsync = promisify(execFile);
-const repoRoot = path.resolve('.');
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 function cliRoutes(): Set<string> {
   return new Set(Object.values(CONTROL_CLI_ROUTES).map((route) => `${route.method} ${route.path}`));
@@ -139,6 +140,23 @@ function splitTopLevel(text: string, separator: string): string[] {
   return parts.map((part) => part.trim());
 }
 
+/**
+ * Fails when a raw fetch( in the panel script takes a string literal starting
+ * with /api as its first argument; such a call bypasses the panel's api()
+ * helper and would escape the parity parsing. Neither fetch(path, ...) inside
+ * the api() helper nor the bridge fetches (http://127.0.0.1:3333/...) trips it.
+ */
+function assertNoRawApiFetch(script: string): void {
+  // \b also catches window.fetch(...), not only a bare fetch(...).
+  for (const match of script.matchAll(/\bfetch\(/g)) {
+    const open = (match.index ?? 0) + match[0].length - 1;
+    const first = splitTopLevel(argumentText(script, open), ',')[0];
+    if (/^(['"])\/api/.test(first)) {
+      throw new Error(`Panel script calls fetch(${first}, ...) on a literal /api path; use the api() helper so the parity check can see it.`);
+    }
+  }
+}
+
 function panelCalls(): Set<string> {
   const script = renderAppJs();
   const calls = new Set<string>();
@@ -148,13 +166,14 @@ function panelCalls(): Set<string> {
     const args = argumentText(script, open);
     const [first, ...rest] = splitTopLevel(args, ',');
     const pieces = splitTopLevel(first, '+');
-    if (!/^'\/api[^']*'$/.test(pieces[0])) {
+    if (!/^(['"])\/api.*\1$/.test(pieces[0])) {
       throw new Error(`Panel call with a non-literal path cannot be checked for parity: api(${args})`);
     }
-    const callPath = pieces.map((piece) => (/^'[^']*'$/.test(piece) ? piece.slice(1, -1) : ':id')).join('');
-    const method = /method:\s*'POST'/.test(rest.join(',')) ? 'POST' : 'GET';
+    const callPath = pieces.map((piece) => (/^(['"]).*\1$/.test(piece) ? piece.slice(1, -1) : ':id')).join('');
+    const method = /method:\s*['\"]POST['\"]/.test(rest.join(',')) ? 'POST' : 'GET';
     calls.add(`${method} ${callPath}`);
   }
+  assertNoRawApiFetch(script);
   return calls;
 }
 
@@ -191,7 +210,7 @@ async function menuBarCalls(): Promise<Set<string>> {
         // The method is set later in the same function; stop at the next func.
         const following = swift.slice((match.index ?? 0) + match[0].length).split(/\bfunc\s/)[0];
         const method = following.match(/httpMethod = "(GET|POST)"/)?.[1] ?? 'GET';
-        calls.add(`${method} ${match[1]}`);
+        calls.add(`${method} ${match[1].replace(/\\\([^)]*\)/g, ':id')}`);
       }
     }
   }
@@ -255,7 +274,9 @@ describe('UI / API / CLI parity (UI is an API control plane)', () => {
       'POST /api/control/pause',
       'POST /api/control/resume',
       'POST /api/sessions/:id/pause',
-      'POST /api/approvals/:id/approve'
+      'POST /api/approvals/:id/approve',
+      'GET /api/settings',
+      'POST /api/settings'
     ]) {
       expect(routes, route).toContain(route);
     }
@@ -271,6 +292,16 @@ describe('UI / API / CLI parity (UI is an API control plane)', () => {
     expect(panel).toContain('GET /api/control');
     expect(panel).toContain('POST /api/control/pause');
     expect(panel).toContain('POST /api/control/resume');
+    // The Return-key setting: panel checkbox and menu-bar Settings toggle.
+    expect(panel).toContain('GET /api/settings');
+    expect(panel).toContain('POST /api/settings');
+    expect(menuBar).toContain('GET /api/settings');
+    expect(menuBar).toContain('POST /api/settings');
+  });
+
+  it('rejects a raw fetch call to a literal /api path in the panel script', () => {
+    const script = "const result = fetch('/api/secret', { method: 'POST' });";
+    expect(() => assertNoRawApiFetch(script)).toThrowError(/fetch\('\/api\/secret'/);
   });
 
   it('every endpoint the panel or menu bar calls has a CLI verb', async () => {

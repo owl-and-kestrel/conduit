@@ -136,6 +136,23 @@ after 10 minutes; **timeout means deny**, applied whenever the record is read,
 so a stale ask can never be approved late. Hard denials include project-root
 sandbox violations and secret-looking filenames.
 
+**Allow for this chat.** Next to Allow once, a shell command or single-file
+write from a paired chat can be allowed for this chat (web panel button, ⌘Return
+in the popover, `conduit approvals approve <id> --for-this-chat`, or
+`remember: "session"` on the approve call). The same exact command, or a write
+to the same path, then runs without asking in that chat only. It is never
+remembered for another chat, ends when the chat is revoked or expires, and is
+gone after Conduit restarts: it is kept only in the memory of the process that
+asked. It only skips an ask; anything policy denies stays denied. Patches and
+untrusted requests can only be allowed once.
+
+**Return on shell commands.** In the popover and the web panel, Return on a
+shell command whose details are closed opens the details; Return again allows
+it. Clicking is not affected. The setting **Return approves shell commands
+without opening details** (off by default) turns this off: the Settings window,
+the panel's Approvals view, `conduit settings set
+--return-approves-shell-without-details on|off`, or `POST /api/settings`.
+
 **Pause.** `conduit pause` (or `POST /api/control/pause`) sets a flag in the
 state root that every execution path checks before any tool runs, including
 trusted auto-runs and `--yes`. While paused nothing runs, no approval is asked,

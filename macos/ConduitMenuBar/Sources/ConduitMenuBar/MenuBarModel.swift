@@ -33,6 +33,9 @@ final class MenuBarModel: ObservableObject {
     @Published var services: [ServiceRow] = []
     @Published var hotKeyRegistered = false
     @Published var pauseSupported = true
+    /// Mirrors `GET /api/settings`; false (the cautious default) until read.
+    @Published var returnApprovesShellWithoutDetails = false
+    @Published var settingsSupported = false
 
     weak var actions: MenuBarActions?
 
@@ -61,12 +64,24 @@ final class MenuBarModel: ObservableObject {
         case .toggleDetails:
             guard let id = selection.selectedId else { return false }
             if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
-        case .allowOnce:
+        case .allowOnce, .allowWithScope:
             guard let ask = selectedAsk else { return false }
-            actions?.decide(ask.approvalId, .approve)
-        case .allowWithScope:
-            guard selectedAsk != nil else { return false }
-            show("Remembering a decision for this chat is not available yet. Use Return to allow just this once.", isError: false)
+            if ReturnKeyGate.opensDetailsFirst(
+                ask,
+                detailsOpen: expanded.contains(ask.approvalId),
+                returnApprovesShellWithoutDetails: returnApprovesShellWithoutDetails
+            ) {
+                expanded.insert(ask.approvalId)
+                show("Details opened. Check the command, then press Return again to allow it.", isError: false)
+                return true
+            }
+            if command == .allowOnce {
+                actions?.decide(ask.approvalId, .approve)
+            } else if AllowForThisChat.isOffered(for: ask) {
+                actions?.decideForThisChat(ask.approvalId)
+            } else {
+                show("This request can't be remembered for this chat. Press Return to allow it once.", isError: false)
+            }
         case .deny:
             guard let ask = selectedAsk else { return false }
             actions?.decide(ask.approvalId, .deny)
@@ -83,6 +98,8 @@ final class MenuBarModel: ObservableObject {
 
 protocol MenuBarActions: AnyObject {
     func decide(_ approvalId: String, _ decision: ApprovalDecision)
+    func decideForThisChat(_ approvalId: String)
+    func setReturnApprovesShellWithoutDetails(_ value: Bool)
     func togglePause()
     func stopAll()
     func startAndResume()

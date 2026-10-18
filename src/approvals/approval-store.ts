@@ -39,6 +39,12 @@ export interface ApprovalRecord extends ConfirmationRequest {
   decidedAt?: string;
   decidedBy?: string;
   decisionReason?: string;
+  /**
+   * Set on an approval the person chose to remember for this chat ("Allow for
+   * this chat"). The asking process turns it into an in-memory grant for the
+   * same session only; see src/approvals/session-grants.ts.
+   */
+  remember?: 'session';
   executionStatus?: ApprovalExecutionStatus;
   executionRunId?: string;
   executionError?: string;
@@ -106,7 +112,8 @@ export async function resolveApprovalRequest(
   approvalId: string,
   status: 'approved' | 'denied',
   decisionReason?: string,
-  decidedBy?: string
+  decidedBy?: string,
+  options: { remember?: 'session' } = {}
 ): Promise<ApprovalRecord> {
   // Lazy expiry runs first, so a stale ask can never be approved late.
   const record = await loadApprovalRecord(approvalId);
@@ -124,7 +131,8 @@ export async function resolveApprovalRequest(
     updatedAt: now,
     decidedAt: now,
     ...(decidedBy ? { decidedBy } : {}),
-    ...(decisionReason ? { decisionReason } : {})
+    ...(decisionReason ? { decisionReason } : {}),
+    ...(status === 'approved' && options.remember === 'session' ? { remember: 'session' as const } : {})
   };
   await writeApprovalRecord(updated);
   return updated;

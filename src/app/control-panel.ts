@@ -4,7 +4,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { ClipboardWatcher } from '../daemon/clipboard-watcher.js';
 import { MacClipboardIO, type ClipboardIO } from '../daemon/clipboard-io.js';
 import { getRunsRoot, getStateRoot, isSafeRunId, resolveRunFile, RunPathError } from '../state/paths.js';
-import { createSession, listSessions, pauseSession, resumeSession, revokeSession } from '../sessions/session-store.js';
+import { createSession, getSession, listSessions, pauseSession, resumeSession, revokeSession } from '../sessions/session-store.js';
 import { isPermissionProfileName } from '../sessions/profiles.js';
 import { renderAgentHandshake } from '../protocol/render-agent-handshake.js';
 import { createConduitUrl, parseConduitUrl } from '../protocol/conduit-url.js';
@@ -14,11 +14,14 @@ import {
   listApprovalRequests,
   markApprovalExecutionFinished,
   markApprovalExecutionRunning,
-  resolveApprovalRequest
+  resolveApprovalRequest,
+  type ApprovalRecord
 } from '../approvals/approval-store.js';
+import { isRememberableAction, REMEMBER_FOR_THIS_CHAT } from '../approvals/session-grants.js';
 import { executeApprovedReview, executeRequestFromUnknown } from '../daemon/execute-request.js';
 import { createDiagnosticBundle } from '../diagnostics/diagnostic-bundle.js';
 import { getPauseState } from '../state/pause-state.js';
+import { getSettings, parseSettingsUpdate, SettingsValidationError, updateSettings } from '../state/settings.js';
 import { getControlStatus, pauseAll, resumeAll, stopAll } from './control-operations.js';
 import { getControlIdentity } from './control-identity.js';
 import { renderAppHtml, renderAppJs } from './control-panel-ui.js';
@@ -121,7 +124,9 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           approvals: true,
           sessions: true,
           runs: true,
-          pause: true
+          pause: true,
+          settings: true,
+          rememberForThisChat: true
         }
       });
       return;
@@ -254,6 +259,27 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       return;
     }
 
+    // Settings (UI is an API control plane): the panel, the menu bar's Settings
+    // window and `conduit settings show/set` all make these same two calls.
+    if (req.method === 'GET' && url.pathname === '/api/settings') {
+      sendJson(res, 200, { settings: await getSettings() });
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/settings') {
+      try {
+        const update = parseSettingsUpdate(await readJsonBody(req));
+        sendJson(res, 200, { settings: await updateSettings(update) });
+      } catch (error) {
+        if (error instanceof SettingsValidationError) {
+          sendJson(res, 400, { error: error.message });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/runs') {
       sendJson(res, 200, { runs: await listRuns() });
       return;
@@ -277,7 +303,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 
     const approvalMatch = url.pathname.match(/^\/api\/approvals\/([^/]+)\/(approve|deny)$/);
     if (req.method === 'POST' && approvalMatch?.[1] && approvalMatch?.[2]) {
-      const body = await readJsonBody(req) as { reason?: unknown; decidedBy?: unknown };
+      const body = await readJsonBody(req) as { reason?: unknown; decidedBy?: unknown; remember?: unknown };
       const decision = approvalMatch[2] === 'approve' ? 'approved' : 'denied';
       const approvalId = decodeURIComponent(approvalMatch[1]);
       // decidedBy is an audit label for the channel (panel, menu bar,
@@ -295,11 +321,24 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         sendJson(res, 409, { error: 'Conduit is paused. Resume before approving.', approval: before });
         return;
       }
+      // "Allow for this chat" (Jon 2026-10-18: remembered for this chat only).
+      // Refused up front, with nothing decided, unless the ask is a confirmation
+      // from a live session for an action that can be remembered exactly. An
+      // untrusted review can never be remembered: approve once creates no trust.
+      const remember = body.remember === undefined || body.remember === null ? undefined : body.remember;
+      if (remember !== undefined) {
+        const refusal = await rememberRefusal(remember, decision, before);
+        if (refusal) {
+          sendJson(res, 400, { error: refusal, approval: before });
+          return;
+        }
+      }
       const approval = await resolveApprovalRequest(
         approvalId,
         decision,
         typeof body.reason === 'string' ? body.reason : undefined,
-        decidedBy
+        decidedBy,
+        remember === undefined ? {} : { remember: REMEMBER_FOR_THIS_CHAT }
       );
       if (approval.status !== decision) {
         // Already decided another way, or expired (timeout = deny). A late
@@ -405,6 +444,27 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   } catch (error) {
     sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
   }
+}
+
+async function rememberRefusal(
+  remember: unknown,
+  decision: 'approved' | 'denied',
+  approval: ApprovalRecord
+): Promise<string | null> {
+  if (remember !== REMEMBER_FOR_THIS_CHAT) return 'remember must be "session" (this chat only).';
+  if (decision !== 'approved') return 'Only an approval can be remembered for this chat.';
+  if (approval.status !== 'pending') return null; // the normal 409 path reports it
+  if (approval.action.tool === 'conduit.review') {
+    return 'An untrusted request can only be approved once; it cannot be remembered.';
+  }
+  if (!isRememberableAction(approval.action)) {
+    return `${approval.action.tool} cannot be remembered for this chat. Allow it once instead.`;
+  }
+  const session = approval.sessionId ? await getSession(approval.sessionId) : null;
+  if (!session || session.state !== 'active') {
+    return 'This request is not from a live chat, so it cannot be remembered. Allow it once instead.';
+  }
+  return null;
 }
 
 async function listRuns(): Promise<Array<Record<string, unknown>>> {

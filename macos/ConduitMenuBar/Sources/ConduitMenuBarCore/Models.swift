@@ -230,15 +230,40 @@ public struct ControlIdentity: Decodable, Equatable {
     }
 }
 
+/// `GET/POST /api/settings`. A setting the server does not send keeps its
+/// cautious default, so an older Control never loosens anything.
+public struct ConduitSettings: Decodable, Equatable {
+    /// Off (the default): Return on a shell command opens its details first.
+    public let returnApprovesShellWithoutDetails: Bool
+
+    public init(returnApprovesShellWithoutDetails: Bool = false) {
+        self.returnApprovesShellWithoutDetails = returnApprovesShellWithoutDetails
+    }
+
+    enum CodingKeys: String, CodingKey { case returnApprovesShellWithoutDetails }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        returnApprovesShellWithoutDetails = (try? c.decode(Bool.self, forKey: .returnApprovesShellWithoutDetails)) ?? false
+    }
+}
+
+public struct SettingsResponse: Decodable, Equatable {
+    public let settings: ConduitSettings
+}
+
 public struct ControlCapabilities: Decodable, Equatable {
     public let agentHandshake: Bool?
     public let conduitUrlOpen: Bool?
     public let pause: Bool?
+    /// `GET/POST /api/settings` exist (Return-key setting).
+    public let settings: Bool?
 
-    public init(agentHandshake: Bool? = nil, conduitUrlOpen: Bool? = nil, pause: Bool? = nil) {
+    public init(agentHandshake: Bool? = nil, conduitUrlOpen: Bool? = nil, pause: Bool? = nil, settings: Bool? = nil) {
         self.agentHandshake = agentHandshake
         self.conduitUrlOpen = conduitUrlOpen
         self.pause = pause
+        self.settings = settings
     }
 }
 

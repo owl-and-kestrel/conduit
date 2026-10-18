@@ -7,8 +7,8 @@ public enum PopoverCommand: Equatable {
     case selectNext
     case toggleDetails
     case allowOnce
-    /// ⌘Return: allow and choose a scope. Scopes (grants) are slice S3, which
-    /// has not landed, so the app answers this with an explanation, not a yes.
+    /// ⌘Return: "Allow for this chat" (remembered for this chat/session only,
+    /// Jon 2026-10-18). Only offered where `AllowForThisChat.isOffered` says so.
     case allowWithScope
     case deny
     case togglePause
@@ -69,6 +69,35 @@ public enum KeyBindings {
             }
         default:
             return nil
+        }
+    }
+}
+
+/// Return on a shell command (Jon 2026-10-18). With the ask's details closed,
+/// Return (and ⌘Return) opens them instead of allowing, so a command is never
+/// approved unseen. With them open it allows. The setting "Return approves
+/// shell commands without opening details" (off by default; `POST
+/// /api/settings`) turns this off. Clicking the buttons is not affected.
+public enum ReturnKeyGate {
+    public static func opensDetailsFirst(
+        _ ask: ApprovalSummary,
+        detailsOpen: Bool,
+        returnApprovesShellWithoutDetails: Bool
+    ) -> Bool {
+        ask.action.tool == "shell.run" && !detailsOpen && !returnApprovesShellWithoutDetails
+    }
+}
+
+/// Whether "Allow for this chat" is offered: a confirmation from a chat for an
+/// exact shell command or a single-file write. Control re-checks all of this
+/// (and that the chat is still live) and refuses anything else.
+public enum AllowForThisChat {
+    public static func isOffered(for ask: ApprovalSummary) -> Bool {
+        guard ask.isAwaitingDecision, !ask.isReview, let sessionId = ask.sessionId, !sessionId.isEmpty else { return false }
+        switch ask.action.tool {
+        case "shell.run": return !(ask.action.args?.command ?? "").isEmpty
+        case "file.write": return !(ask.action.args?.path ?? "").isEmpty
+        default: return false
         }
     }
 }

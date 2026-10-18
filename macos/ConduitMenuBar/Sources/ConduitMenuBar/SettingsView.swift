@@ -20,6 +20,12 @@ struct SettingsView: View {
                     ))
                     .disabled(model.busy || model.state.stopped)
                 }
+                Toggle("Return approves shell commands without opening details", isOn: Binding(
+                    get: { model.returnApprovesShellWithoutDetails },
+                    set: { model.actions?.setReturnApprovesShellWithoutDetails($0) }
+                ))
+                .disabled(!model.settingsSupported)
+                .help("Off: Return on a shell command opens its details first; press Return again to allow it.")
                 LabeledContent(
                     "Open Conduit",
                     value: model.hotKeyRegistered ? KeyBindings.hotKeyDescription : "\(KeyBindings.hotKeyDescription) unavailable (in use by another app)"

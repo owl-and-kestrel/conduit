@@ -67,6 +67,43 @@ final class ControlClientTests: XCTestCase {
         XCTAssertEqual(try lastBody()["decidedBy"], "menubar")
     }
 
+    func testAllowForThisChatSendsRememberSession() async throws {
+        StubURLProtocol.reply = .init(status: 200, body: #"{"approval":{"approvalId":"approval_1","status":"approved","action":{"tool":"shell.run"}}}"#)
+        _ = try await client.decide(approvalId: "approval_1", .approve, channel: .menubar, forThisChat: true)
+        XCTAssertEqual(StubURLProtocol.requests.last?.url?.path, "/api/approvals/approval_1/approve")
+        XCTAssertEqual(try lastBody()["remember"], "session")
+        XCTAssertEqual(try lastBody()["decidedBy"], "menubar")
+        // Allow once never sends remember.
+        _ = try await client.decide(approvalId: "approval_1", .approve, channel: .menubar)
+        XCTAssertNil(try lastBody()["remember"])
+        // A deny is never remembered, even if asked.
+        XCTAssertNil(ControlClient.decisionBody(.deny, channel: .menubar, forThisChat: true)["remember"])
+    }
+
+    func testSettingsReadAndWriteUseTheSettingsEndpoint() async throws {
+        StubURLProtocol.reply = .init(status: 200, body: #"{"settings":{"returnApprovesShellWithoutDetails":true}}"#)
+        let read = try await client.settings()
+        XCTAssertTrue(read.returnApprovesShellWithoutDetails)
+        XCTAssertEqual(StubURLProtocol.requests.last?.httpMethod, "GET")
+        XCTAssertEqual(StubURLProtocol.requests.last?.url?.path, "/api/settings")
+
+        StubURLProtocol.reply = .init(status: 200, body: #"{"settings":{"returnApprovesShellWithoutDetails":false}}"#)
+        let written = try await client.setReturnApprovesShellWithoutDetails(false)
+        XCTAssertFalse(written.returnApprovesShellWithoutDetails)
+        let request = try XCTUnwrap(StubURLProtocol.requests.last)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url?.path, "/api/settings")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+        XCTAssertEqual(body["returnApprovesShellWithoutDetails"] as? Bool, false)
+    }
+
+    func testMissingOrMalformedSettingsKeepTheCautiousDefault() throws {
+        let empty = try JSONDecoder().decode(SettingsResponse.self, from: Data(#"{"settings":{}}"#.utf8))
+        XCTAssertFalse(empty.settings.returnApprovesShellWithoutDetails)
+        let wrongType = try JSONDecoder().decode(SettingsResponse.self, from: Data(#"{"settings":{"returnApprovesShellWithoutDetails":"yes"}}"#.utf8))
+        XCTAssertFalse(wrongType.settings.returnApprovesShellWithoutDetails)
+    }
+
     func testNotificationDecisionsSendDecidedByNotification() async throws {
         StubURLProtocol.reply = .init(status: 200, body: #"{"execution":{"runId":"run_9"},"copiedToClipboard":true}"#)
         let response = try await client.decide(approvalId: "approval_1", .approve, channel: .notification)
@@ -141,7 +178,9 @@ final class ControlClientTests: XCTestCase {
             (.approvals, "GET", "/api/approvals"),
             (.approval(id: "approval_1"), "GET", "/api/approvals/approval_1"),
             (.decide(id: "approval_1", .approve), "POST", "/api/approvals/approval_1/approve"),
-            (.decide(id: "approval_1", .deny), "POST", "/api/approvals/approval_1/deny")
+            (.decide(id: "approval_1", .deny), "POST", "/api/approvals/approval_1/deny"),
+            (.settings, "GET", "/api/settings"),
+            (.updateSettings, "POST", "/api/settings")
         ]
         for (endpoint, method, path) in expected {
             XCTAssertEqual(endpoint.method, method)

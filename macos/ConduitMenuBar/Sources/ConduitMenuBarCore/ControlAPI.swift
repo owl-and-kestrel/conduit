@@ -28,12 +28,14 @@ public enum ControlEndpoint: Equatable {
     case approvals
     case approval(id: String)
     case decide(id: String, ApprovalDecision)
+    case settings
+    case updateSettings
 
     public var method: String {
         switch self {
-        case .status, .control, .approvals, .approval:
+        case .status, .control, .approvals, .approval, .settings:
             return "GET"
-        case .pause, .resume, .stopAll, .decide:
+        case .pause, .resume, .stopAll, .decide, .updateSettings:
             return "POST"
         }
     }
@@ -49,6 +51,8 @@ public enum ControlEndpoint: Equatable {
         case .approval(let id): return "/api/approvals/\(id)"
         case .decide(let id, .approve): return "/api/approvals/\(id)/approve"
         case .decide(let id, .deny): return "/api/approvals/\(id)/deny"
+        case .settings: return "/api/settings"
+        case .updateSettings: return "/api/settings"
         }
     }
 }
@@ -145,7 +149,7 @@ public final class ControlClient {
         self.session = session
     }
 
-    public func request(_ endpoint: ControlEndpoint, body: [String: String]? = nil, timeout: TimeInterval = 5) throws -> URLRequest {
+    public func request(_ endpoint: ControlEndpoint, body: [String: Any]? = nil, timeout: TimeInterval = 5) throws -> URLRequest {
         guard let url = URL(string: endpoint.path, relativeTo: baseURL) else {
             throw ControlAPIError(statusCode: nil, userMessage: "Invalid Conduit Control URL.")
         }
@@ -200,32 +204,49 @@ public final class ControlClient {
     }
 
     /// Approve or deny. `decidedBy` is always the channel the person used.
+    /// `forThisChat` is "Allow for this chat": Control remembers the approval
+    /// for that one chat (session) only, and refuses it for anything else.
     public func decide(
         approvalId: String,
         _ decision: ApprovalDecision,
         channel: DecisionChannel,
-        reason: String? = nil
+        reason: String? = nil,
+        forThisChat: Bool = false
     ) async throws -> ApprovalDecisionResponse {
         guard isValidApprovalId(approvalId) else {
             throw ControlAPIError(statusCode: nil, userMessage: "That is not a Conduit request id.")
         }
-        let body = Self.decisionBody(decision, channel: channel, reason: reason)
+        let body = Self.decisionBody(decision, channel: channel, reason: reason, forThisChat: forThisChat)
         // Approving a review runs it before Control answers, so allow time.
         return try await send(.decide(id: approvalId, decision), body: body, timeout: 60)
     }
 
-    public static func decisionBody(_ decision: ApprovalDecision, channel: DecisionChannel, reason: String? = nil) -> [String: String] {
+    public static func decisionBody(_ decision: ApprovalDecision, channel: DecisionChannel, reason: String? = nil, forThisChat: Bool = false) -> [String: String] {
         let defaultReason: String
         switch (decision, channel) {
-        case (.approve, .menubar): defaultReason = "Approved from Conduit menu bar."
+        case (.approve, .menubar): defaultReason = forThisChat ? "Allowed for this chat from Conduit menu bar." : "Approved from Conduit menu bar."
         case (.deny, .menubar): defaultReason = "Denied from Conduit menu bar."
         case (.approve, .notification): defaultReason = "Approved from Conduit notification."
         case (.deny, .notification): defaultReason = "Denied from Conduit notification."
         }
-        return ["decidedBy": channel.rawValue, "reason": reason ?? defaultReason]
+        var body = ["decidedBy": channel.rawValue, "reason": reason ?? defaultReason]
+        if forThisChat && decision == .approve { body["remember"] = "session" }
+        return body
     }
 
-    private func send<T: Decodable>(_ endpoint: ControlEndpoint, body: [String: String]? = nil, timeout: TimeInterval = 5) async throws -> T {
+    /// `GET /api/settings`, the same call as `conduit settings show`.
+    public func settings(timeout: TimeInterval = 0.75) async throws -> ConduitSettings {
+        let response: SettingsResponse = try await send(.settings, timeout: timeout)
+        return response.settings
+    }
+
+    /// `POST /api/settings`, the same call as `conduit settings set`.
+    public func setReturnApprovesShellWithoutDetails(_ value: Bool) async throws -> ConduitSettings {
+        let response: SettingsResponse = try await send(.updateSettings, body: ["returnApprovesShellWithoutDetails": value])
+        return response.settings
+    }
+
+    private func send<T: Decodable>(_ endpoint: ControlEndpoint, body: [String: Any]? = nil, timeout: TimeInterval = 5) async throws -> T {
         let request = try request(endpoint, body: body, timeout: timeout)
         let data: Data
         let response: URLResponse

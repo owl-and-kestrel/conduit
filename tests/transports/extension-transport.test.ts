@@ -24,8 +24,11 @@ describe('ExtensionTransport', () => {
   });
 
   afterEach(async () => {
-    await transport.close();
-    vi.useRealTimers();
+    try {
+      await transport.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('serves health state', async () => {

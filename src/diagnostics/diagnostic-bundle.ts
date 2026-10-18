@@ -139,8 +139,8 @@ async function listRecentRuns(): Promise<Array<Record<string, unknown>>> {
         summary: final?.summary
       };
     } catch (error) {
-      // A symlinked run path escaping the runs root leaves the run described,
-      // never the file it points at.
+      // A symlinked run path escaping the runs root is omitted from the list,
+      // and the file it points at is never read.
       if (error instanceof RunPathError) return null;
       throw error;
     }

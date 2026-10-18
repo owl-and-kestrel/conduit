@@ -29,7 +29,9 @@ export interface ExtensionTransportOptions {
    * Extension origins allowed to pair, e.g. `chrome-extension://<id>`. Defaults
    * to $CONDUIT_EXTENSION_ORIGINS. When empty, the first extension origin that
    * pairs is pinned for the life of the bridge (unpacked extension IDs depend
-   * on the install path, so they cannot be hard-coded).
+   * on the install path, so they cannot be hard-coded). When entries are given
+   * but none is a valid extension origin, the constructor throws rather than
+   * falling back to first-come pairing.
    */
   allowedExtensionOrigins?: string[];
   /**
@@ -124,11 +126,20 @@ export class ExtensionTransport implements ModelTransport {
   constructor(private readonly options: ExtensionTransportOptions = {}) {
     const configuredOrigins = options.allowedExtensionOrigins ?? parseOriginList(process.env[EXTENSION_ORIGINS_ENV]);
     const invalidOrigins = configuredOrigins.filter((origin) => !isBrowserExtensionOrigin(origin));
+    const validOrigins = configuredOrigins.filter(isBrowserExtensionOrigin);
+    if (configuredOrigins.length > 0 && validOrigins.length === 0) {
+      // A pin was asked for but none of it is usable. Falling back to first-come
+      // pairing would silently drop the pin, so refuse to start instead.
+      throw new Error(
+        `Refusing to start the Conduit extension bridge: ${EXTENSION_ORIGINS_ENV} names no valid extension origin ` +
+        `(got: ${invalidOrigins.join(', ')}). Use chrome-extension://<id>, or unset it to pair with the first extension.`
+      );
+    }
     if (invalidOrigins.length > 0) {
-      // Say so rather than silently falling back to first-come pairing.
+      // The valid entries still pin pairing; say which entries were dropped.
       console.warn(`[ExtensionTransport] Ignoring non-extension origins in ${EXTENSION_ORIGINS_ENV}: ${invalidOrigins.join(', ')}`);
     }
-    this.allowedExtensionOrigins = new Set(configuredOrigins.filter(isBrowserExtensionOrigin));
+    this.allowedExtensionOrigins = new Set(validOrigins);
     this.controlPanelOrigins = new Set(options.controlPanelOrigins ?? [
       `http://127.0.0.1:${CONTROL_PANEL_DEFAULT_PORT}`,
       `http://localhost:${CONTROL_PANEL_DEFAULT_PORT}`

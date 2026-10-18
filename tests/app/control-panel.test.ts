@@ -410,6 +410,13 @@ describe('control panel app', () => {
     const rebound = await rawRequest(app.url, '/api/status', 'conduit.attacker.example:47831');
     expect(rebound.status).toBe(403);
 
+    // Hosts that parse to loopback but are not written in exact form are refused too.
+    const panelPort = new URL(app.url).port;
+    for (const host of [`127.1:${panelPort}`, `2130706433:${panelPort}`, `attacker@127.0.0.1:${panelPort}`]) {
+      expect((await rawRequest(app.url, '/api/status', host)).status, host).toBe(403);
+    }
+    expect((await rawRequest(app.url, '/api/status', `127.0.0.1:${panelPort}`)).status).toBe(200);
+
     const sameOrigin = await fetch(`${app.url}/api/approvals/${pending.approvalId}/deny`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Origin: app.url },

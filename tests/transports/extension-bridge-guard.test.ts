@@ -3,7 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import vm from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ExtensionTransport } from '../../src/transports/extension-transport.js';
+import { EXTENSION_ORIGINS_ENV, ExtensionTransport } from '../../src/transports/extension-transport.js';
 
 // The bridge on 127.0.0.1:3333 feeds agent turns into the local runtime and
 // hands out outbound harness messages (which carry session nonces). Only the
@@ -119,7 +119,14 @@ describe('extension bridge guard', () => {
       `127.0.0.1.evil.example:${port}`,
       `127.0.0.1:${port}@evil.example`,
       `127.0.0.1:${port + 1}`,
-      '127.0.0.1'
+      '127.0.0.1',
+      // Loopback after URL parsing, but not in the exact form the bridge
+      // answers to: shorthand/numeric IPv4, userinfo, a zero-padded port.
+      `127.1:${port}`,
+      `2130706433:${port}`,
+      `0x7f.0.0.1:${port}`,
+      `attacker@127.0.0.1:${port}`,
+      `127.0.0.1:0${port}`
     ];
     for (const host of forged) {
       const health = await send('GET', '/health', { Host: host });
@@ -183,6 +190,38 @@ describe('extension bridge guard', () => {
     await transport.open();
     port = Number(new URL(transport.getBaseUrl()).port);
 
+    expect((await pair(EXTENSION_ORIGIN)).status).toBe(403);
+    expect((await pair(OTHER_EXTENSION_ORIGIN)).status).toBe(200);
+  });
+
+  it('refuses to start when the configured allowlist names no valid extension origin', async () => {
+    // A bare extension ID (no chrome-extension://) or a web origin is not a
+    // usable pin. Falling back to first-come pairing would drop the pin.
+    const bareId = EXTENSION_ORIGIN.replace('chrome-extension://', '');
+    expect(() => new ExtensionTransport({ port: 0, allowedExtensionOrigins: [bareId] }))
+      .toThrow(/Refusing to start the Conduit extension bridge: CONDUIT_EXTENSION_ORIGINS names no valid extension origin/);
+    expect(() => new ExtensionTransport({ port: 0, allowedExtensionOrigins: [bareId, EVIL_ORIGIN, 'null'] }))
+      .toThrow(/names no valid extension origin/);
+
+    // The same through the environment variable, which is how users set it.
+    const saved = process.env[EXTENSION_ORIGINS_ENV];
+    try {
+      process.env[EXTENSION_ORIGINS_ENV] = ` ${bareId} , ${EVIL_ORIGIN} `;
+      expect(() => new ExtensionTransport({ port: 0 })).toThrow(/names no valid extension origin/);
+      // Unset or empty still means first-come pairing.
+      process.env[EXTENSION_ORIGINS_ENV] = ' , ';
+      expect(() => new ExtensionTransport({ port: 0 })).not.toThrow();
+    } finally {
+      if (saved === undefined) delete process.env[EXTENSION_ORIGINS_ENV];
+      else process.env[EXTENSION_ORIGINS_ENV] = saved;
+    }
+
+    // A list with at least one valid entry keeps that pin: other extensions,
+    // including the first to ask, are refused.
+    await transport.close();
+    transport = new ExtensionTransport({ port: 0, allowedExtensionOrigins: [bareId, OTHER_EXTENSION_ORIGIN] });
+    await transport.open();
+    port = Number(new URL(transport.getBaseUrl()).port);
     expect((await pair(EXTENSION_ORIGIN)).status).toBe(403);
     expect((await pair(OTHER_EXTENSION_ORIGIN)).status).toBe(200);
   });

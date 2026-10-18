@@ -7,7 +7,8 @@
 // - Consent is the core concept, so approvals render as cards that show the
 //   source, declared permissions and every action before the decision buttons.
 // - `?demo=1` switches the client to in-memory sample data (see the demo section
-//   of CLIENT_JS). Demo mode never calls the local API or touches the clipboard.
+//   of CLIENT_JS). Demo mode never calls the local API or the bridge and never
+//   reads the clipboard; a user-clicked Copy button still writes demo text to it.
 // - CLIENT_JS is plain browser JavaScript inside a template literal, so it avoids
 //   backticks, dollar-brace sequences and backslashes.
 
@@ -1054,8 +1055,9 @@ function selectRetryTransportId(bridge) {
 
 // ---------------------------------------------------------------------------
 // Demo data mode (?demo=1). Everything below is in-memory sample data for
-// visitors and screenshots. It never calls the local API, never touches the
-// clipboard and never executes anything. Real mode never reaches this code.
+// visitors and screenshots. It never calls the local API or the bridge, never
+// reads the clipboard and never executes anything (a user-clicked Copy button
+// still writes demo text to the clipboard). Real mode never reaches this code.
 // ---------------------------------------------------------------------------
 
 function minutesAgo(minutes) {

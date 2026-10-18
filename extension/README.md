@@ -35,7 +35,9 @@ to configure.
   extension from a new folder while the bridge is running, it answers 403
   ("paired with another extension"): restart Conduit. To pin known IDs
   instead of first-come pairing, set
-  `CONDUIT_EXTENSION_ORIGINS=chrome-extension://<id>[,...]`.
+  `CONDUIT_EXTENSION_ORIGINS=chrome-extension://<id>[,...]`. If none of the
+  entries is a valid extension origin (for example a bare ID), the bridge
+  refuses to start rather than falling back to first-come pairing.
 
 Extension-only mode is intentionally non-executing. It can make Conduit blocks easier to recognize and copy, but local execution and approval require the Conduit desktop app and daemon.
 

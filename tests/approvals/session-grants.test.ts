@@ -32,6 +32,7 @@ describe('Allow for this chat (session-scoped remembered approvals)', () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     clearAllSessionGrants();
     delete process.env.CONDUIT_STATE_DIR;
     await rm(tempRoot, { recursive: true, force: true });
@@ -103,15 +104,20 @@ describe('Allow for this chat (session-scoped remembered approvals)', () => {
   });
 
   it('expires with the session', async () => {
+    // Injected clock (review F-02): only Date is faked, so file I/O and timers stay real and nothing sleeps.
     const session = await createSession({
       label: 'Short chat',
       permissionProfile: 'shell-manual',
       allowedRoots: [projectRoot],
-      expiresAt: new Date(Date.now() + 200).toISOString()
+      expiresAt: new Date(Date.now() + 60_000).toISOString()
     });
     const lookup = { sessionId: session.sessionId, action: shell('echo grant-ok'), projectRoot };
     expect(await addSessionGrant(lookup)).not.toBeNull();
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    const expiresAt = Date.parse(session.expiresAt!);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(expiresAt - 1_000);
+    expect(await findSessionGrant(lookup)).not.toBeNull();
+    vi.setSystemTime(expiresAt + 1_000);
     expect(await findSessionGrant(lookup)).toBeNull();
   });
 

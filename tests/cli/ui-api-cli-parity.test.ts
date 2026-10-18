@@ -105,7 +105,7 @@ function argumentText(source: string, open: number): string {
       else if (char === quote) quote = null;
       continue;
     }
-    if (char === "'" || char === '"') quote = char;
+    if (char === "'" || char === '"' || char === '`') quote = char;
     else if (char === '(' || char === '{' || char === '[') depth += 1;
     else if (char === ')' || char === '}' || char === ']') {
       depth -= 1;
@@ -128,7 +128,7 @@ function splitTopLevel(text: string, separator: string): string[] {
       else if (char === quote) quote = null;
       continue;
     }
-    if (char === "'" || char === '"') quote = char;
+    if (char === "'" || char === '"' || char === '`') quote = char;
     else if (char === '(' || char === '{' || char === '[') depth += 1;
     else if (char === ')' || char === '}' || char === ']') depth -= 1;
     else if (char === separator && depth === 0) {
@@ -141,17 +141,20 @@ function splitTopLevel(text: string, separator: string): string[] {
 }
 
 /**
- * Fails when a raw fetch( in the panel script takes a string literal starting
+ * Fails when a raw fetch in the panel script takes a string literal starting
  * with /api as its first argument; such a call bypasses the panel's api()
- * helper and would escape the parity parsing. Neither fetch(path, ...) inside
- * the api() helper nor the bridge fetches (http://127.0.0.1:3333/...) trips it.
+ * helper and would escape the parity parsing. The first argument may be
+ * single-quoted, double-quoted or a backtick template, and the call may be a
+ * bare fetch(, fetch (, window.fetch( or globalThis.fetch(. Neither
+ * fetch(path, ...) inside the api() helper nor the bridge fetches to
+ * http://127.0.0.1:3333/... trips it.
  */
 function assertNoRawApiFetch(script: string): void {
   // \b also catches window.fetch(...), not only a bare fetch(...).
-  for (const match of script.matchAll(/\bfetch\(/g)) {
+  for (const match of script.matchAll(/\bfetch\s*\(/g)) {
     const open = (match.index ?? 0) + match[0].length - 1;
     const first = splitTopLevel(argumentText(script, open), ',')[0];
-    if (/^(['"])\/api/.test(first)) {
+    if (/^(['"`])\/api/.test(first)) {
       throw new Error(`Panel script calls fetch(${first}, ...) on a literal /api path; use the api() helper so the parity check can see it.`);
     }
   }
@@ -300,8 +303,34 @@ describe('UI / API / CLI parity (UI is an API control plane)', () => {
   });
 
   it('rejects a raw fetch call to a literal /api path in the panel script', () => {
-    const script = "const result = fetch('/api/secret', { method: 'POST' });";
-    expect(() => assertNoRawApiFetch(script)).toThrowError(/fetch\('\/api\/secret'/);
+    for (const script of [
+      "const result = fetch('/api/secret', { method: 'POST' });",
+      'const result = fetch("/api/secret");',
+      'const result = fetch(`/api/secret`);',
+      "window.fetch(`/api/approvals/${id}/approve`, { method: 'POST' });",
+      "window.fetch('/api/control');",
+      'globalThis.fetch("/api/control");',
+      "fetch ('/api/control');",
+      // An apostrophe inside a template must not open a quote (backtick quoting in argumentText/splitTopLevel).
+      'fetch(`/api/it\'s`);'
+    ]) {
+      expect(() => assertNoRawApiFetch(script)).toThrowError(/literal \/api path/);
+    }
+    expect(() => assertNoRawApiFetch("const result = fetch('/api/secret', { method: 'POST' });")).toThrowError(/fetch\('\/api\/secret'/);
+  });
+
+  it('allows the api() helper and bridge fetches in the panel script', () => {
+    for (const script of [
+      'function api(path, init) { return fetch(path, init); }',
+      'fetch(`http://127.0.0.1:3333/health`);',
+      "fetch('http://127.0.0.1:3333/health', { method: 'GET' });",
+      'fetch(`http://127.0.0.1:3333/x?a=(1,2)`, { note: \'/api/not-first\' });',
+      // An apostrophe inside a template must not open a quote (backtick quoting in argumentText/splitTopLevel).
+      'fetch(`http://127.0.0.1:3333/it\'s`);',
+      renderAppJs()
+    ]) {
+      expect(() => assertNoRawApiFetch(script)).not.toThrow();
+    }
   });
 
   it('every endpoint the panel or menu bar calls has a CLI verb', async () => {

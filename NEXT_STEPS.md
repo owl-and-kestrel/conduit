@@ -21,12 +21,6 @@ Next, in rough priority order:
    build machine's absolute path (fixed for future builds in
    `script/package_dmg.sh`), and the owlandkestrel.com release redirects still
    go through the old jon-vs-moloch repository URL.
-4. The Swift supervisor (`PortListeners` in `Supervisor.swift`) matches
-   `dist/cli/index.js` in process command lines, but the build emits
-   `dist/src/cli/index.js`. Harmless today (the app runs the CLI through
-   `npm run conduit`), but the matcher should follow the real path.
-   `script/build_and_run.sh` no longer matches command lines: its run modes
-   stop only this checkout's app and that app's child processes.
 
 The gate log below is the build history. Read it for context; the list above
 is the current queue.

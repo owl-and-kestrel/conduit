@@ -917,12 +917,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 waitForControlAppHealth(completion: completion)
                 return
             }
-            let unexpectedPids = pids.filter { !PortListeners.isConduitControlListener(pid: $0, repoRoot: RepoLocator.repoRoot()) }
-            if !unexpectedPids.isEmpty {
-                throw AppError("Port 47831 is in use by a non-Conduit process: \(unexpectedPids.map { String($0) }.joined(separator: ", ")).")
+            // Stop only a control app that is ours; another checkout's (or an
+            // installed Conduit's) is left running and reported.
+            let listeners = try PortListeners.ownedListeners(on: 47831, service: .control)
+            if !listeners.foreign.isEmpty {
+                throw PortListeners.foreignListenerError(port: 47831, listeners.foreign)
             }
 
-            for pid in pids {
+            for pid in listeners.ours {
                 ProcessTree.terminateTree(of: pid)
             }
             recompute()
@@ -981,12 +983,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startAgentListener() {
         do {
-            let pids = try PortListeners.listenerPids(on: 3333)
-            let unexpectedPids = pids.filter { !PortListeners.isConduitAgentListener(pid: $0, repoRoot: RepoLocator.repoRoot()) }
-            if !unexpectedPids.isEmpty {
-                throw AppError("Port 3333 is in use by a non-Conduit process: \(unexpectedPids.map { String($0) }.joined(separator: ", ")).")
+            // Stop only an agent listener that is ours; another checkout's (or
+            // an installed Conduit's) is left running and reported.
+            let listeners = try PortListeners.ownedListeners(on: 3333, service: .agentListener)
+            if !listeners.foreign.isEmpty {
+                throw PortListeners.foreignListenerError(port: 3333, listeners.foreign)
             }
-            for pid in pids {
+            for pid in listeners.ours {
                 ProcessTree.terminateTree(of: pid)
             }
             waitForPortToClear(3333) {

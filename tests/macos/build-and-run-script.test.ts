@@ -74,17 +74,26 @@ function isAlive(pid: number): boolean {
 describe.skipIf(process.platform === 'win32')('script/build_and_run.sh process scoping', () => {
   let tempRoot: string;
   let fakes: ChildProcess[];
-  let extraPids: number[];
+  // Forked children and grandchildren of stand-ins: a Set, so each pid is
+  // recorded (and signalled in teardown) once.
+  let extraPids: Set<number>;
 
   beforeEach(async () => {
     tempRoot = await mkdtemp(path.join(os.tmpdir(), 'conduit-build-and-run-'));
     fakes = [];
-    extraPids = [];
+    extraPids = new Set();
   });
 
   afterEach(async () => {
-    for (const pid of [...extraPids, ...fakes.map((fake) => fake.pid ?? 0)]) {
-      if (pid && isAlive(pid)) process.kill(pid, 'SIGKILL');
+    for (const pid of new Set([...extraPids, ...fakes.map((fake) => fake.pid ?? 0)])) {
+      if (!pid) continue;
+      // A stand-in can exit between the check and the kill (ESRCH); teardown
+      // must still reach every other pid and remove tempRoot.
+      try {
+        if (isAlive(pid)) process.kill(pid, 'SIGKILL');
+      } catch {
+        // already gone
+      }
     }
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -105,7 +114,7 @@ describe.skipIf(process.platform === 'win32')('script/build_and_run.sh process s
       const comm = spawnSync('/bin/ps', ['-o', 'comm=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim();
       const children = childPids(pid);
       const grandchildren = children.flatMap(childPids);
-      extraPids.push(...children, ...grandchildren);
+      for (const extra of [...children, ...grandchildren]) extraPids.add(extra);
       if (comm === argv0 && (!withChildren || (children.length === 1 && grandchildren.length === 1))) return pid;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }

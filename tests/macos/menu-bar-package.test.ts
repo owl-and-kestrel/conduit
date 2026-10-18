@@ -70,9 +70,10 @@ describe('macOS menu-bar package scaffold', () => {
     expect(main).toContain('agentHandshake');
     expect(main).toContain('restartStaleControlApp');
     expect(main).toContain('listenerPids(on: 47831)');
-    expect(main).toContain('listenerPids(on: 3333)');
-    expect(main).toContain('isConduitControlListener');
-    expect(main).toContain('isConduitAgentListener');
+    expect(main).toContain('ownedListeners(on: 47831, service: .control)');
+    expect(main).toContain('ownedListeners(on: 3333, service: .agentListener)');
+    expect(main).toContain('ListenerOwnership.classify');
+    expect(main).not.toContain('dist/cli/index.js');
     expect(main).toContain('agent-listener.log');
     expect(main).toContain('"listen", "--project"');
     expect(main).toContain('standardOutput = handle');

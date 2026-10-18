@@ -1,4 +1,5 @@
 import AppKit
+import ConduitMenuBarCore
 import Foundation
 
 // Process supervision for the services the menu bar launches (control app,
@@ -187,35 +188,49 @@ enum PortListeners {
             .compactMap { Int32($0) }
     }
 
-    static func isConduitControlListener(pid: Int32, repoRoot: String) -> Bool {
-        let command = commandLine(for: pid)
-        return command.contains("src/cli/index.ts app start")
-            || command.contains("dist/cli/index.js app start")
-            || (command.contains(repoRoot) && command.contains("app start --port 47831"))
-    }
-
-    static func isConduitAgentListener(pid: Int32, repoRoot: String) -> Bool {
-        let command = commandLine(for: pid)
-        return command.contains("src/cli/index.ts listen")
-            || command.contains("dist/cli/index.js listen")
-            || (command.contains(repoRoot) && command.contains("listen --project"))
-    }
-
-    private static func commandLine(for pid: Int32) -> String {
-        let ps = Process()
-        let output = Pipe()
-        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
-        ps.arguments = ["-p", String(pid), "-o", "command="]
-        ps.standardOutput = output
-        ps.standardError = FileHandle.nullDevice
-        do {
-            try ps.run()
-        } catch {
-            return ""
+    /// The listeners on a port, split into those this app may stop and those
+    /// it must leave running (see ListenerOwnership in ConduitMenuBarCore).
+    /// Pids that have already exited are in neither list.
+    static func ownedListeners(on port: Int, service: ConduitService) throws -> (ours: [Int32], foreign: [ProcessSnapshot]) {
+        let owner = appOwner()
+        var ours: [Int32] = []
+        var foreign: [ProcessSnapshot] = []
+        for pid in try listenerPids(on: port) {
+            let snapshot = ProcessProbe.snapshot(pid: pid)
+            switch ListenerOwnership.classify(snapshot, service: service, owner: owner) {
+            case .ours:
+                ours.append(pid)
+            case .foreign:
+                if let snapshot {
+                    foreign.append(snapshot)
+                }
+            case .gone:
+                break
+            }
         }
-        ps.waitUntilExit()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8) ?? ""
+        return (ours, foreign)
+    }
+
+    /// The error shown when a port is held by a process that is not ours.
+    static func foreignListenerError(port: Int, _ foreign: [ProcessSnapshot]) -> AppError {
+        let holders = foreign.map(\.summary).joined(separator: ", ")
+        return AppError(
+            "Port \(port) is in use by a process this Conduit app did not start and that is not from its checkout (\(RepoLocator.repoRoot())): \(holders). "
+                + "Conduit left it running. Quit the other Conduit app or stop that process, then choose Restart services."
+        )
+    }
+
+    /// This app's pid, its checkout (only when it really is one) and its
+    /// .app bundle (only when running from one, not from a bare build dir).
+    private static func appOwner() -> ListenerOwner {
+        let repoRoot = RepoLocator.repoRoot()
+        let isCheckout = FileManager.default.fileExists(atPath: "\(repoRoot)/package.json")
+        let bundle = Bundle.main.bundleURL
+        return ListenerOwner(
+            pid: getpid(),
+            checkoutRoot: isCheckout ? repoRoot : nil,
+            bundlePath: bundle.pathExtension == "app" ? bundle.path : nil
+        )
     }
 }
 

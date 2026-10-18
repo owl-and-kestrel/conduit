@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ToolAction } from '../protocol/schemas.js';
 import { getStateRoot } from '../state/paths.js';
@@ -239,7 +240,12 @@ async function readApprovalRecord(approvalId: string): Promise<ApprovalRecord | 
 
 async function writeApprovalRecord(record: ApprovalRecord): Promise<void> {
   await ensureApprovalsDir();
-  await writeFile(getApprovalPath(record.approvalId), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+  // Write-then-rename so a concurrent reader (a waiter, the panel, lazy
+  // expiry) never sees a truncated file and mistakes it for an unknown id.
+  const filePath = getApprovalPath(record.approvalId);
+  const tempPath = `${filePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+  await rename(tempPath, filePath);
 }
 
 async function ensureApprovalsDir(): Promise<void> {

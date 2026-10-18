@@ -16,6 +16,27 @@ The extension does not bypass auth, solve verification challenges, extract cooki
 - Reports content-script heartbeat status to `http://127.0.0.1:3333/api/conduit-tab-status`.
 - Shows an extension-only fallback in the popup when the local desktop app/listener is not reachable.
 
+## Pairing
+
+The local bridge answers only this extension. On its first call the extension
+`POST`s `/api/conduit-pair`; the bridge accepts that only from a
+`chrome-extension://` (or `moz-extension://`) origin, which web pages cannot
+send, pins that origin and returns a per-process token. Every other bridge call
+(`bridge-client.js`) sends the token as `X-Conduit-Bridge-Token`; after a bridge
+or service-worker restart the extension re-pairs on its own. There is nothing
+to configure.
+
+- Web-page origins get 403 on every endpoint, including CORS preflights.
+- Requests must be addressed to `127.0.0.1` or `localhost` on the bridge port
+  (DNS rebinding is refused).
+- The Conduit control panel origin may read `/health` and request a retry;
+  Origin-less local clients (menu-bar app, `curl`) may read `/health`.
+- Unpacked extension IDs depend on the install folder. If you load the
+  extension from a new folder while the bridge is running, it answers 403
+  ("paired with another extension"): restart Conduit. To pin known IDs
+  instead of first-come pairing, set
+  `CONDUIT_EXTENSION_ORIGINS=chrome-extension://<id>[,...]`.
+
 Extension-only mode is intentionally non-executing. It can make Conduit blocks easier to recognize and copy, but local execution and approval require the Conduit desktop app and daemon.
 
 ## Alpha Package

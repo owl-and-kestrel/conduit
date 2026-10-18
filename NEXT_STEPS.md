@@ -7,7 +7,8 @@
   and not notarized; its update manifest is O+K-signed.
 - Portfolio polish pass: redesigned control panel with consent cards, a
   labelled demo data mode (`?demo=1`), restyled website and extension popup,
-  loopback-only / same-origin guard on the control API, README quickstart
+  loopback-only / same-origin guard on the control API, extension bridge
+  restricted to loopback hosts and the paired extension, README quickstart
   split into Linux-and-macOS vs macOS-only, and `npm run screenshots`.
 
 Next, in rough priority order:
@@ -16,13 +17,11 @@ Next, in rough priority order:
 2. Linux and Windows clipboard I/O. `src/daemon/clipboard-io.ts` only has
    `MacClipboardIO` (`pbpaste`/`pbcopy`), so the clipboard daemon and the
    panel's clipboard buttons do not work on the Linux/Windows previews yet.
-3. Give the extension bridge (`127.0.0.1:3333`) the same Host/Origin guard as
-   the control panel, scoped to the extension's origin and the panel.
-4. Release hygiene: the published v0.0.1 `Conduit.dmg.sha256` contains the
+3. Release hygiene: the published v0.0.1 `Conduit.dmg.sha256` contains the
    build machine's absolute path (fixed for future builds in
    `script/package_dmg.sh`), and the owlandkestrel.com release redirects still
    go through the old jon-vs-moloch repository URL.
-5. `script/build_and_run.sh` and the Swift supervisor match
+4. `script/build_and_run.sh` and the Swift supervisor match
    `dist/cli/index.js` in process command lines, but the build emits
    `dist/src/cli/index.js`. Harmless today (the app runs the CLI through
    `npm run conduit`), but the matchers should follow the real path.

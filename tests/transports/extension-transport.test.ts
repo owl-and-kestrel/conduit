@@ -12,6 +12,7 @@ describe('ExtensionTransport', () => {
       sendRetryDelaysMs: [10, 20]
     });
     await transport.open();
+    bridgeToken = await pairAsExtension(transport);
   });
 
   afterEach(async () => {
@@ -74,6 +75,7 @@ describe('ExtensionTransport', () => {
       tabStatusStaleMs: 10
     });
     await transport.open();
+    bridgeToken = await pairAsExtension(transport);
 
     await postJson(`${transport.getBaseUrl()}/api/conduit-tab-status`, {
       tabId: 42,
@@ -149,7 +151,7 @@ describe('ExtensionTransport', () => {
   it('delivers queued outbound messages to extension pollers', async () => {
     const send = transport.sendMessage('hello ChatGPT');
 
-    const response = await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+    const response = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const outbound = await response.json() as OutboundPollResponse;
     expect(outbound).toMatchObject({
       type: 'harness_message',
@@ -173,7 +175,7 @@ describe('ExtensionTransport', () => {
   it('keeps listening after outbound delivery even before send confirmation', async () => {
     const send = transport.sendMessage('hello ChatGPT');
 
-    const response = await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+    const response = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const outbound = await response.json() as OutboundPollResponse;
     expect(outbound.transportId).toBe('out-1');
     await expect(send).resolves.toBeUndefined();
@@ -203,7 +205,7 @@ describe('ExtensionTransport', () => {
   it('requeues failed sends with daemon-side backoff', async () => {
     const send = transport.sendMessage('hello ChatGPT');
 
-    const response = await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+    const response = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const outbound = await response.json() as OutboundPollResponse;
     await expect(send).resolves.toBeUndefined();
 
@@ -227,7 +229,7 @@ describe('ExtensionTransport', () => {
     });
 
     await delay(20);
-    const retryResponse = await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+    const retryResponse = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const retry = await retryResponse.json() as OutboundPollResponse;
     expect(retry).toMatchObject({
       transportId: outbound.transportId,
@@ -238,7 +240,7 @@ describe('ExtensionTransport', () => {
   it('requeues stalled sends when the extension reports no send progress', async () => {
     const send = transport.sendMessage('hello ChatGPT');
 
-    const response = await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+    const response = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const outbound = await response.json() as OutboundPollResponse;
     await expect(send).resolves.toBeUndefined();
 
@@ -257,7 +259,7 @@ describe('ExtensionTransport', () => {
     expect(state.retryingOutboundIds.includes(outbound.transportId) || state.outboundQueued > 0).toBe(true);
 
     await delay(15);
-    const retryResponse = await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+    const retryResponse = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const retry = await retryResponse.json() as OutboundPollResponse;
     expect(retry.transportId).toBe(outbound.transportId);
   });
@@ -265,7 +267,7 @@ describe('ExtensionTransport', () => {
   it('keeps waiting while the extension reports send progress', async () => {
     const send = transport.sendMessage('hello ChatGPT');
 
-    const response = await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+    const response = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const outbound = await response.json() as OutboundPollResponse;
     await expect(send).resolves.toBeUndefined();
 
@@ -299,10 +301,11 @@ describe('ExtensionTransport', () => {
       sendRetryDelaysMs: [10, 20]
     });
     await transport.open();
+    bridgeToken = await pairAsExtension(transport);
 
     const send = transport.sendMessage('hello ChatGPT');
 
-    const response = await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+    const response = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const outbound = await response.json() as OutboundPollResponse;
     await expect(send).resolves.toBeUndefined();
 
@@ -335,7 +338,7 @@ describe('ExtensionTransport', () => {
   it('manually retries a retrying outbound before its scheduled backoff fires', async () => {
     const send = transport.sendMessage('hello ChatGPT');
 
-    const firstResponse = await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+    const firstResponse = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const first = await firstResponse.json() as OutboundPollResponse;
     await expect(send).resolves.toBeUndefined();
 
@@ -370,7 +373,7 @@ describe('ExtensionTransport', () => {
       }
     });
 
-    const retryResponse = await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+    const retryResponse = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const retry = await retryResponse.json() as OutboundPollResponse;
     expect(retry.transportId).toBe(first.transportId);
   });
@@ -378,7 +381,7 @@ describe('ExtensionTransport', () => {
   it('marks outbound sends as needing attention after retries are exhausted', async () => {
     const send = transport.sendMessage('hello ChatGPT');
 
-    const firstResponse = await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+    const firstResponse = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const first = await firstResponse.json() as OutboundPollResponse;
     await expect(send).resolves.toBeUndefined();
 
@@ -392,7 +395,7 @@ describe('ExtensionTransport', () => {
       const health = await fetch(`${transport.getBaseUrl()}/health`);
       const state = await health.json() as any;
       if (!state.lastTransportError?.exhausted) {
-        await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+        await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
       }
     }
 
@@ -414,7 +417,7 @@ describe('ExtensionTransport', () => {
   it('manually retries an exhausted outbound send', async () => {
     const send = transport.sendMessage('hello ChatGPT');
 
-    const firstResponse = await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+    const firstResponse = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const first = await firstResponse.json() as OutboundPollResponse;
     await expect(send).resolves.toBeUndefined();
 
@@ -428,7 +431,7 @@ describe('ExtensionTransport', () => {
       const health = await fetch(`${transport.getBaseUrl()}/health`);
       const state = await health.json() as any;
       if (!state.lastTransportError?.exhausted) {
-        await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+        await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
       }
     }
 
@@ -441,7 +444,7 @@ describe('ExtensionTransport', () => {
       status: 'queued'
     });
 
-    const retryResponse = await fetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
+    const retryResponse = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-outbound`);
     const retry = await retryResponse.json() as OutboundPollResponse;
     expect(retry.transportId).toBe(first.transportId);
 
@@ -456,7 +459,7 @@ describe('ExtensionTransport', () => {
   });
 
   it('returns a useful error when there is no outbound message to retry', async () => {
-    const response = await fetch(`${transport.getBaseUrl()}/api/conduit-retry`, {
+    const response = await bridgeFetch(`${transport.getBaseUrl()}/api/conduit-retry`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({})
@@ -470,6 +473,33 @@ describe('ExtensionTransport', () => {
   });
 });
 
+const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+let bridgeToken = '';
+
+/** Pairs the way the extension does: POST /api/conduit-pair from its own origin. */
+async function pairAsExtension(target: ExtensionTransport, origin = EXTENSION_ORIGIN): Promise<string> {
+  const response = await fetch(`${target.getBaseUrl()}/api/conduit-pair`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: origin },
+    body: '{}'
+  });
+  expect(response.status).toBe(200);
+  const { token } = await response.json() as { token: string };
+  return token;
+}
+
+/** fetch as the paired extension: its origin plus the bridge token. */
+function bridgeFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(url, {
+    ...init,
+    headers: {
+      ...(init.headers as Record<string, string> | undefined),
+      Origin: EXTENSION_ORIGIN,
+      'X-Conduit-Bridge-Token': bridgeToken
+    }
+  });
+}
+
 interface OutboundPollResponse {
   type: string;
   transportId: string;
@@ -481,7 +511,7 @@ function delay(ms: number): Promise<void> {
 }
 
 async function postJson(url: string, body: unknown): Promise<any> {
-  const response = await fetch(url, {
+  const response = await bridgeFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)

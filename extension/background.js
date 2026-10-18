@@ -1,4 +1,5 @@
-const BRIDGE_BASE_URL = 'http://127.0.0.1:3333';
+// Pairing and the bridge token live in bridge-client.js (conduitBridgeFetch).
+importScripts('bridge-client.js');
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[Conduit Bridge] Extension installed.');
@@ -53,7 +54,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'POLL_OUTBOUND') {
-    fetch(`${BRIDGE_BASE_URL}/api/conduit-outbound`)
+    conduitBridgeFetch('/api/conduit-outbound')
       .then((response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
@@ -78,7 +79,7 @@ async function forwardProtocolBlock(message, sender) {
 }
 
 async function postJson(path, body) {
-  const response = await fetch(`${BRIDGE_BASE_URL}${path}`, {
+  const response = await conduitBridgeFetch(path, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'

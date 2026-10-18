@@ -1,4 +1,4 @@
-const BRIDGE_BASE_URL = 'http://127.0.0.1:3333';
+// conduitBridgeFetch (pairing + bridge token) comes from bridge-client.js.
 
 const elements = {
   stateBadge: document.getElementById('stateBadge'),
@@ -122,13 +122,13 @@ function setBadge(text, className) {
 }
 
 async function getJson(path) {
-  const response = await fetch(`${BRIDGE_BASE_URL}${path}`);
+  const response = await conduitBridgeFetch(path);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
 }
 
 async function postJson(path, body) {
-  const response = await fetch(`${BRIDGE_BASE_URL}${path}`, {
+  const response = await conduitBridgeFetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)

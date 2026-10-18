@@ -11,6 +11,7 @@ mkdir -p "$PACKAGE_ROOT"
 
 cp "$ROOT/extension/manifest.json" "$PACKAGE_ROOT/manifest.json"
 cp "$ROOT/extension/background.js" "$PACKAGE_ROOT/background.js"
+cp "$ROOT/extension/bridge-client.js" "$PACKAGE_ROOT/bridge-client.js"
 cp "$ROOT/extension/content.js" "$PACKAGE_ROOT/content.js"
 cp "$ROOT/extension/popup.html" "$PACKAGE_ROOT/popup.html"
 cp "$ROOT/extension/popup.css" "$PACKAGE_ROOT/popup.css"

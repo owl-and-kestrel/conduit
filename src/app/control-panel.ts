@@ -19,6 +19,7 @@ import {
 import { executeApprovedReview, executeRequestFromUnknown } from '../daemon/execute-request.js';
 import { createDiagnosticBundle } from '../diagnostics/diagnostic-bundle.js';
 import { renderAppHtml, renderAppJs } from './control-panel-ui.js';
+import { CONTROL_PANEL_DEFAULT_PORT, isLoopbackHostname, refuseNonLocalRequest } from '../util/loopback-guard.js';
 
 export { renderAppJs };
 
@@ -36,7 +37,7 @@ export interface ControlPanelHandle {
 }
 
 const DEFAULT_HOST = '127.0.0.1';
-const DEFAULT_PORT = 47831;
+const DEFAULT_PORT = CONTROL_PANEL_DEFAULT_PORT;
 
 export async function startControlPanel(options: ControlPanelOptions = {}): Promise<ControlPanelHandle> {
   const host = options.host ?? DEFAULT_HOST;
@@ -436,53 +437,3 @@ function openBrowser(url: string): Promise<void> {
     child.on('error', reject);
   });
 }
-
-const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
-
-export function isLoopbackHostname(hostname: string): boolean {
-  return LOOPBACK_HOSTNAMES.has(hostname.toLowerCase());
-}
-
-/**
- * Browser-facing guard for the local control API. Binding to 127.0.0.1 keeps
- * other machines out, but any web page the user visits can still send requests
- * to loopback. Refuse:
- * - Host headers that are not loopback (DNS-rebinding pages), and
- * - state-changing requests carrying a foreign Origin or a cross-site
- *   Sec-Fetch-Site (cross-site form/fetch posts that could approve or run work).
- * Non-browser clients (the macOS menu-bar app, curl, tests) send no Origin and
- * are unaffected.
- */
-export function refuseNonLocalRequest(req: http.IncomingMessage): string | null {
-  const hostHeader = req.headers.host;
-  if (hostHeader) {
-    let hostname: string;
-    try {
-      hostname = new URL(`http://${hostHeader}`).hostname;
-    } catch {
-      return 'Invalid Host header.';
-    }
-    if (!isLoopbackHostname(hostname)) {
-      return 'Conduit Control only answers requests addressed to a loopback host.';
-    }
-  }
-
-  const method = (req.method ?? 'GET').toUpperCase();
-  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
-    return null;
-  }
-
-  const fetchSite = req.headers['sec-fetch-site'];
-  if (typeof fetchSite === 'string' && fetchSite !== 'same-origin' && fetchSite !== 'none') {
-    return 'Cross-site requests cannot change Conduit state.';
-  }
-
-  const origin = req.headers.origin;
-  if (typeof origin === 'string' && origin.length > 0) {
-    if (!hostHeader || origin !== `http://${hostHeader}`) {
-      return 'Cross-origin requests cannot change Conduit state.';
-    }
-  }
-  return null;
-}
-

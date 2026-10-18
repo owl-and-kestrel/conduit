@@ -128,7 +128,12 @@ violations and secret-looking filenames.
 **Local-only API.** Every Conduit service binds `127.0.0.1`. The control panel refuses
 to bind anything else, answers only loopback `Host` headers (DNS rebinding) and
 rejects state-changing requests from other origins. The menu-bar app, curl and
-the tests send no `Origin` and are unaffected.
+the tests send no `Origin` and are unaffected. The extension bridge (`:3333`)
+answers only `127.0.0.1`/`localhost` on its own port and only the Conduit
+extension: the extension pairs from its `chrome-extension://` origin, which web
+pages cannot claim, and every bridge call then carries the per-process pairing
+token. Web origins get 403, preflights included; the control panel may read
+`/health` and request a retry. See [extension/README.md](extension/README.md#pairing).
 
 A request looks like this:
 
@@ -185,8 +190,6 @@ Not production-ready yet:
 - clipboard support on Linux and Windows (the daemon uses `pbpaste`/`pbcopy`)
 - native Windows and Linux tray apps
 - a Chrome Web Store listing for the extension
-- the same origin guard on the extension bridge (`:3333`) that the control
-  panel now has
 - sandboxed dry runs and trust analysis for higher-risk requests
 - robust tab discard/throttle detection and live ChatGPT extension tests
 

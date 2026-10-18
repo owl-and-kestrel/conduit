@@ -1,11 +1,23 @@
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
+import {
+  CONTROL_PANEL_DEFAULT_PORT,
+  EXTENSION_BRIDGE_DEFAULT_PORT,
+  isBrowserExtensionOrigin,
+  isCrossSiteFetch,
+  refuseNonLoopbackHost
+} from '../util/loopback-guard.js';
 import type { AssistantTurn, ModelTransport, WaitOptions } from './types.js';
 
-const DEFAULT_PORT = 3333;
+const DEFAULT_PORT = EXTENSION_BRIDGE_DEFAULT_PORT;
 const SEND_RESULT_TIMEOUT_MS = 300_000;
 const SEND_PROGRESS_TIMEOUT_MS = 90_000;
 const SEND_RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
 const TAB_STATUS_STALE_MS = 30_000;
+const BRIDGE_HOST = '127.0.0.1';
+export const BRIDGE_TOKEN_HEADER = 'x-conduit-bridge-token';
+/** Comma-separated extension origins to accept instead of pairing with the first one. */
+export const EXTENSION_ORIGINS_ENV = 'CONDUIT_EXTENSION_ORIGINS';
 
 export interface ExtensionTransportOptions {
   port?: number;
@@ -13,7 +25,24 @@ export interface ExtensionTransportOptions {
   sendProgressTimeoutMs?: number;
   sendRetryDelaysMs?: number[];
   tabStatusStaleMs?: number;
+  /**
+   * Extension origins allowed to pair, e.g. `chrome-extension://<id>`. Defaults
+   * to $CONDUIT_EXTENSION_ORIGINS. When empty, the first extension origin that
+   * pairs is pinned for the life of the bridge (unpacked extension IDs depend
+   * on the install path, so they cannot be hard-coded).
+   */
+  allowedExtensionOrigins?: string[];
+  /**
+   * Origins of the Conduit control panel, which may read /health and request a
+   * retry without pairing. Defaults to the panel's loopback origins.
+   */
+  controlPanelOrigins?: string[];
 }
+
+/** What a request is allowed to do after the bridge guard has run. */
+type BridgeAccess =
+  | { ok: true; paired: boolean; panel: boolean; corsOrigin: string | null }
+  | { ok: false; status: 401 | 403; error: string; corsOrigin: string | null };
 
 interface IncomingExtensionPayload {
   payload?: unknown;
@@ -86,8 +115,25 @@ export class ExtensionTransport implements ModelTransport {
   private lastTransportError: unknown = null;
   private tabStatusCount = 0;
   private lastTabStatus: unknown = null;
+  /** Per-process pairing secret. The extension learns it from /api/conduit-pair. */
+  private readonly bridgeToken = randomBytes(32).toString('base64url');
+  private readonly allowedExtensionOrigins: Set<string>;
+  private readonly controlPanelOrigins: Set<string>;
+  private pairedExtensionOrigin: string | null = null;
 
-  constructor(private readonly options: ExtensionTransportOptions = {}) {}
+  constructor(private readonly options: ExtensionTransportOptions = {}) {
+    const configuredOrigins = options.allowedExtensionOrigins ?? parseOriginList(process.env[EXTENSION_ORIGINS_ENV]);
+    const invalidOrigins = configuredOrigins.filter((origin) => !isBrowserExtensionOrigin(origin));
+    if (invalidOrigins.length > 0) {
+      // Say so rather than silently falling back to first-come pairing.
+      console.warn(`[ExtensionTransport] Ignoring non-extension origins in ${EXTENSION_ORIGINS_ENV}: ${invalidOrigins.join(', ')}`);
+    }
+    this.allowedExtensionOrigins = new Set(configuredOrigins.filter(isBrowserExtensionOrigin));
+    this.controlPanelOrigins = new Set(options.controlPanelOrigins ?? [
+      `http://127.0.0.1:${CONTROL_PANEL_DEFAULT_PORT}`,
+      `http://localhost:${CONTROL_PANEL_DEFAULT_PORT}`
+    ]);
+  }
 
   async open(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -99,7 +145,8 @@ export class ExtensionTransport implements ModelTransport {
         reject(error);
       });
 
-      this.server.listen(this.options.port ?? DEFAULT_PORT, '127.0.0.1', () => {
+      // Loopback only: the bridge can feed agent turns into the local runtime.
+      this.server.listen(this.options.port ?? DEFAULT_PORT, BRIDGE_HOST, () => {
         console.log('\n--- Extension Transport Started ---');
         console.log(`Listening for browser extension on ${this.getBaseUrl()}`);
         resolve();
@@ -149,9 +196,12 @@ export class ExtensionTransport implements ModelTransport {
   }
 
   getBaseUrl(): string {
+    return `http://${BRIDGE_HOST}:${this.getListeningPort()}`;
+  }
+
+  private getListeningPort(): number {
     const address = this.server?.address();
-    const port = typeof address === 'object' && address ? address.port : (this.options.port ?? DEFAULT_PORT);
-    return `http://127.0.0.1:${port}`;
+    return typeof address === 'object' && address ? address.port : (this.options.port ?? DEFAULT_PORT);
   }
 
   async sendMessage(message: string): Promise<void> {
@@ -191,11 +241,23 @@ export class ExtensionTransport implements ModelTransport {
   }
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    setCorsHeaders(res);
+    const access = this.authorize(req);
+    if (access.corsOrigin) {
+      setCorsHeaders(res, access.corsOrigin);
+    }
+    if (!access.ok) {
+      sendJson(res, access.status, { error: access.error });
+      return;
+    }
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/conduit-pair') {
+      sendJson(res, 200, { token: this.bridgeToken });
       return;
     }
 
@@ -236,6 +298,18 @@ export class ExtensionTransport implements ModelTransport {
       return;
     }
 
+    if (req.url === '/api/conduit-retry') {
+      if (!access.paired && !access.panel) {
+        sendJson(res, 401, { error: 'Pair with the Conduit bridge first.' });
+        return;
+      }
+    } else if (!access.paired) {
+      // Outbound messages, inbound agent turns and send/tab reports belong to
+      // the paired extension only.
+      sendJson(res, 401, { error: 'Pair with the Conduit bridge first.' });
+      return;
+    }
+
     if (req.method === 'GET' && req.url === '/api/conduit-outbound') {
       this.handleOutboundPoll(req, res);
       return;
@@ -273,6 +347,75 @@ export class ExtensionTransport implements ModelTransport {
     }
 
     sendJson(res, 404, { error: 'Not found' });
+  }
+
+  /**
+   * Bridge policy. Every request must be addressed to 127.0.0.1/localhost on
+   * the bridge's own port (blocks DNS rebinding). Browser requests must come
+   * from the paired extension's origin or, for /health and /api/conduit-retry,
+   * the Conduit control panel; any other Origin, including every web page, is
+   * refused, so their CORS preflights fail too. Extension endpoints also
+   * require the pairing token, which only an extension origin can obtain from
+   * /api/conduit-pair. Origin-less clients (menu-bar app, curl) may read
+   * /health.
+   */
+  private authorize(req: http.IncomingMessage): BridgeAccess {
+    const hostRefusal = refuseNonLoopbackHost(req, { port: this.getListeningPort(), requireHost: true });
+    if (hostRefusal) {
+      return { ok: false, status: 403, error: hostRefusal, corsOrigin: null };
+    }
+
+    const method = (req.method ?? 'GET').toUpperCase();
+    const path = req.url ?? '/';
+    const origin = typeof req.headers.origin === 'string' ? req.headers.origin : null;
+    const paired = this.hasValidToken(req);
+
+    if (origin !== null) {
+      const isExtension = isBrowserExtensionOrigin(origin);
+      const panel = this.controlPanelOrigins.has(origin);
+      if (isExtension && this.canPairWith(origin)) {
+        if (path === '/api/conduit-pair' && method === 'POST') {
+          this.pairedExtensionOrigin ??= origin;
+        }
+        return { ok: true, paired, panel: false, corsOrigin: origin };
+      }
+      if (panel && (path === '/health' || path === '/api/conduit-retry')) {
+        return { ok: true, paired: false, panel: true, corsOrigin: origin };
+      }
+      return {
+        ok: false,
+        status: 403,
+        error: isExtension
+          ? `The Conduit bridge is paired with another extension. Restart the bridge or add this origin to ${EXTENSION_ORIGINS_ENV}.`
+          : 'The Conduit bridge only accepts requests from the paired Conduit extension.',
+        corsOrigin: null
+      };
+    }
+
+    // No Origin: a non-browser client, a top-level navigation, or a no-cors
+    // subresource (<img>, <script>) that a web page fired at us.
+    if (path === '/api/conduit-pair' || method === 'OPTIONS') {
+      return { ok: false, status: 403, error: 'Pairing requires the Conduit extension.', corsOrigin: null };
+    }
+    if (isCrossSiteFetch(req) && !paired && !(method === 'GET' && path === '/health' && req.headers['sec-fetch-mode'] === 'navigate')) {
+      return { ok: false, status: 403, error: 'Cross-site requests cannot reach the Conduit bridge.', corsOrigin: null };
+    }
+    return { ok: true, paired, panel: false, corsOrigin: null };
+  }
+
+  private canPairWith(origin: string): boolean {
+    if (this.allowedExtensionOrigins.size > 0) {
+      return this.allowedExtensionOrigins.has(origin);
+    }
+    return this.pairedExtensionOrigin === null || this.pairedExtensionOrigin === origin;
+  }
+
+  private hasValidToken(req: http.IncomingMessage): boolean {
+    const presented = req.headers[BRIDGE_TOKEN_HEADER];
+    if (typeof presented !== 'string') return false;
+    const expected = Buffer.from(this.bridgeToken);
+    const actual = Buffer.from(presented);
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
   }
 
   private handleOutboundPoll(req: http.IncomingMessage, res: http.ServerResponse): void {
@@ -605,10 +748,15 @@ export class ExtensionTransport implements ModelTransport {
   }
 }
 
-function setCorsHeaders(res: http.ServerResponse): void {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+function setCorsHeaders(res: http.ServerResponse, origin: string): void {
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', `Content-Type, ${BRIDGE_TOKEN_HEADER}`);
+}
+
+function parseOriginList(value: string | undefined): string[] {
+  return (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
 }
 
 function sendJson(res: http.ServerResponse, statusCode: number, value: unknown): void {

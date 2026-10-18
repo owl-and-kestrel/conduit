@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -84,6 +84,61 @@ describe('policy engine', () => {
     })).resolves.toEqual({
       decision: 'deny',
       reason: `Path is outside allowed roots: ${outsidePath}`
+    });
+  });
+
+  it('denies a new file under an in-project symlinked folder that points outside', async () => {
+    const outsideDir = path.join(tempRoot, 'outside');
+    await mkdir(outsideDir, { recursive: true });
+    await symlink(outsideDir, path.join(projectRoot, 'linked'));
+    session.permissionProfile = 'edit-with-confirmation';
+
+    await expect(evaluateActionPolicy({
+      session,
+      action: action('file.write', { path: 'linked/new.txt', content: 'x\n', mode: 'create' })
+    })).resolves.toEqual({
+      decision: 'deny',
+      reason: 'Path is outside allowed roots: linked/new.txt'
+    });
+
+    const absolutePath = path.join(projectRoot, 'linked', 'new.txt');
+    await expect(evaluateActionPolicy({
+      session,
+      action: action('file.write', { path: absolutePath, content: 'x\n', mode: 'create' })
+    })).resolves.toEqual({
+      decision: 'deny',
+      reason: `Path is outside allowed roots: ${absolutePath}`
+    });
+  });
+
+  it('allows in-project names that start with two dots and still denies ../', async () => {
+    await writeFile(path.join(projectRoot, '..foo'), 'dots\n', 'utf8');
+    await writeFile(path.join(tempRoot, 'x'), 'outside\n', 'utf8');
+
+    await expect(evaluateActionPolicy({
+      session,
+      action: action('file.read', { path: '..foo' })
+    })).resolves.toEqual({ decision: 'allow' });
+
+    await expect(evaluateActionPolicy({
+      session,
+      action: action('file.read', { path: '../x' })
+    })).resolves.toEqual({
+      decision: 'deny',
+      reason: 'Path is outside allowed roots: ../x'
+    });
+  });
+
+  it('denies .git paths as the file tools do', async () => {
+    await mkdir(path.join(projectRoot, '.git'), { recursive: true });
+    await writeFile(path.join(projectRoot, '.git', 'config'), '[core]\n', 'utf8');
+
+    await expect(evaluateActionPolicy({
+      session,
+      action: action('file.read', { path: '.git/config' })
+    })).resolves.toEqual({
+      decision: 'deny',
+      reason: 'Path is outside allowed roots: .git/config'
     });
   });
 

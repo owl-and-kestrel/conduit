@@ -47,8 +47,37 @@ export async function resolveInsideProject(inputPath: string, projectRoot: strin
   return resolvedPath;
 }
 
+/**
+ * resolveInsideProject for a caller that holds several allowed roots (a
+ * session's allowedRoots). It is a wrapper, not a second check: each root is
+ * tested with resolveInsideProject, and the first root that accepts the path
+ * returns its real path. A relative path means the first root, as it does for
+ * the tools, whose projectRoot is that root. If no root accepts the path, the
+ * first root's refusal is thrown.
+ */
+export async function resolveInsideAnyRoot(inputPath: string, roots: readonly string[]): Promise<string> {
+  const [firstRoot] = roots;
+  if (firstRoot === undefined) {
+    throw new Error(`Path is outside project root: ${inputPath} (no allowed roots)`);
+  }
+  const absoluteInput = path.isAbsolute(inputPath) ? inputPath : path.resolve(await realpath(firstRoot), inputPath);
+
+  let refusal: unknown;
+  for (const root of roots) {
+    try {
+      return await resolveInsideProject(absoluteInput, root);
+    } catch (error) {
+      refusal ??= error;
+    }
+  }
+  throw refusal;
+}
+
 function isInside(relative: string): boolean {
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  // Only `..` itself or a `../` prefix leaves the root; `..foo` is an ordinary
+  // in-project name.
+  const leavesRoot = relative === '..' || relative.startsWith(`..${path.sep}`);
+  return relative === '' || (!leavesRoot && !path.isAbsolute(relative));
 }
 
 // Matches `.git` in any letter case (case-insensitive filesystems such as the

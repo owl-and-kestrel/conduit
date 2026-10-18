@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from 'node:
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveInsideProject } from '../../src/policy/sandbox.js';
+import { resolveInsideAnyRoot, resolveInsideProject } from '../../src/policy/sandbox.js';
 import { fileWriteTool } from '../../src/tools/file-write.js';
 import { executeToolAction } from '../../src/tools/types.js';
 
@@ -51,6 +51,35 @@ describe('resolveInsideProject', () => {
       .resolves.toBe(path.join(projectRoot, 'src', 'new.ts'));
     await expect(resolveInsideProject('a/b/c/new.ts', projectRoot))
       .resolves.toBe(path.join(projectRoot, 'a', 'b', 'c', 'new.ts'));
+  });
+
+  it('allows in-project names that start with two dots, and still refuses ..', async () => {
+    await writeFile(path.join(projectRoot, '..foo'), 'dots\n', 'utf8');
+
+    await expect(resolveInsideProject('..foo', projectRoot)).resolves.toBe(path.join(projectRoot, '..foo'));
+    await expect(resolveInsideProject('..bar/new.txt', projectRoot))
+      .resolves.toBe(path.join(projectRoot, '..bar', 'new.txt'));
+    await expect(resolveInsideProject('../x', projectRoot)).rejects.toThrow(/outside project root/);
+    await expect(resolveInsideProject('..', projectRoot)).rejects.toThrow(/outside project root/);
+    await expect(resolveInsideProject('src/../../x', projectRoot)).rejects.toThrow(/outside project root/);
+  });
+
+  it('resolveInsideAnyRoot checks each root with resolveInsideProject', async () => {
+    const second = path.join(base, 'second');
+    await mkdir(second, { recursive: true });
+    await symlink(outside, path.join(second, 'linked'));
+    const roots = [projectRoot, second];
+
+    // Relative paths mean the first root; absolute paths may land in any root.
+    await expect(resolveInsideAnyRoot('src/new.ts', roots)).resolves.toBe(path.join(projectRoot, 'src', 'new.ts'));
+    await expect(resolveInsideAnyRoot(path.join(second, 'new.ts'), roots)).resolves.toBe(path.join(second, 'new.ts'));
+    // A symlinked folder in the second root that points outside is still refused.
+    await expect(resolveInsideAnyRoot(path.join(second, 'linked', 'new.txt'), roots))
+      .rejects.toThrow(/outside project root/);
+    await expect(resolveInsideAnyRoot(path.join(outside, 'secret.txt'), roots)).rejects.toThrow(/outside project root/);
+    await expect(resolveInsideAnyRoot('..foo', roots)).resolves.toBe(path.join(projectRoot, '..foo'));
+    await expect(resolveInsideAnyRoot('../x', roots)).rejects.toThrow(/outside project root/);
+    await expect(resolveInsideAnyRoot('src/new.ts', [])).rejects.toThrow(/outside project root.*no allowed roots/);
   });
 
   it('allows an in-project symlinked directory that points inside the project', async () => {

@@ -1,10 +1,9 @@
-import path from 'node:path';
-import { realpath } from 'node:fs/promises';
 import type { ToolAction } from '../protocol/schemas.js';
 import type { ConduitSession } from '../sessions/session-store.js';
 import { PROFILES, type PermissionProfileName } from '../sessions/profiles.js';
 import { getTool } from '../tools/registry.js';
 import { DEFAULT_POLICY_BUDGETS, type PolicyBudgets } from './budgets.js';
+import { resolveInsideAnyRoot } from './sandbox.js';
 import { isSensitivePath } from './sensitive-paths.js';
 
 export type PolicyDecision =
@@ -98,18 +97,14 @@ async function evaluatePathPolicy(action: ToolAction, session?: ConduitSession):
     return { decision: 'requires_review', reason: 'Path-scoped action has no trusted session.' };
   }
 
-  const allowedRoots = await Promise.all(session.allowedRoots.map((root) => realpath(root)));
-  const resolvedPath = path.isAbsolute(requestedPath)
-    ? path.resolve(requestedPath)
-    : path.resolve(allowedRoots[0] ?? process.cwd(), requestedPath);
-
-  const realRequestedPath = await realpath(resolvedPath).catch(() => resolvedPath);
-  const insideAllowedRoot = allowedRoots.some((root) => {
-    const relative = path.relative(root, realRequestedPath);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-  });
-
-  if (!insideAllowedRoot) {
+  // The same containment check the file tools enforce at execution
+  // (resolveInsideProject), so this advice cannot disagree with the sandbox:
+  // symlinks are resolved through the deepest existing ancestor, and .git,
+  // dangling symlinks and symlink loops are refused. Any refusal is a deny.
+  let realRequestedPath: string;
+  try {
+    realRequestedPath = await resolveInsideAnyRoot(requestedPath, session.allowedRoots);
+  } catch {
     return { decision: 'deny', reason: `Path is outside allowed roots: ${requestedPath}` };
   }
 

@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -359,9 +360,61 @@ describe('control panel app', () => {
     const listed = await fetchJson(`${app.url}/api/sessions`);
     expect(listed.sessions.some((session: any) => session.sessionId === created.session.sessionId)).toBe(true);
   });
+
+  it('returns the handshake for manual copy when no system clipboard is available', async () => {
+    clipboard.failWrites = true;
+    const created = await fetchJson(`${app.url}/api/agent-handshake`, {
+      method: 'POST',
+      body: JSON.stringify({ label: 'No clipboard', root: projectRoot })
+    });
+    expect(created.copied).toBe(false);
+    expect(created.clipboardError).toContain('no clipboard');
+    expect(created.handshake).toContain(created.session.sessionId);
+  });
+
+  it('refuses cross-origin and DNS-rebinding requests to the local API', async () => {
+    const pending = await createApprovalRequest({
+      action: { id: 'write_notes', tool: 'file.write', args: { path: 'notes.txt', content: 'x' }, reason: 'Persist notes.', risk: 'high' },
+      policyReason: 'Tool requires confirmation: file.write',
+      prompt: 'Allow?'
+    });
+
+    const crossOrigin = await fetch(`${app.url}/api/approvals/${pending.approvalId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain', Origin: 'https://evil.example' },
+      body: '{}'
+    });
+    expect(crossOrigin.status).toBe(403);
+
+    const crossSite = await fetch(`${app.url}/api/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site' },
+      body: JSON.stringify({ label: 'csrf', root: projectRoot, profile: 'shell-manual' })
+    });
+    expect(crossSite.status).toBe(403);
+
+    const listed = await fetchJson(`${app.url}/api/approvals`);
+    expect(listed.approvals.find((approval: any) => approval.approvalId === pending.approvalId).status).toBe('pending');
+
+    const rebound = await rawRequest(app.url, '/api/status', 'conduit.attacker.example:47831');
+    expect(rebound.status).toBe(403);
+
+    const sameOrigin = await fetch(`${app.url}/api/approvals/${pending.approvalId}/deny`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: app.url },
+      body: JSON.stringify({ reason: 'same-origin UI' })
+    });
+    expect(sameOrigin.status).toBe(200);
+  });
+
+  it('refuses to bind the control panel to a non-loopback host', async () => {
+    await expect(startControlPanel({ host: '0.0.0.0', port: 0, clipboard })).rejects.toThrow(/non-loopback/);
+  });
 });
 
 class FakeClipboard implements ClipboardIO {
+  failWrites = false;
+
   constructor(public text: string) {}
 
   async read(): Promise<string> {
@@ -369,8 +422,21 @@ class FakeClipboard implements ClipboardIO {
   }
 
   async write(text: string): Promise<void> {
+    if (this.failWrites) throw new Error('no clipboard on this host');
     this.text = text;
   }
+}
+
+function rawRequest(baseUrl: string, requestPath: string, host: string): Promise<{ status: number }> {
+  const target = new URL(baseUrl);
+  return new Promise((resolve, reject) => {
+    const req = http.request({ hostname: target.hostname, port: target.port, path: requestPath, method: 'GET', headers: { Host: host } }, (res) => {
+      res.resume();
+      resolve({ status: res.statusCode ?? 0 });
+    });
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 async function fetchJson(url: string, init?: RequestInit): Promise<any> {

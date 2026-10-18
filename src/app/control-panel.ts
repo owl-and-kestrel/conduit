@@ -38,6 +38,11 @@ const DEFAULT_PORT = 47831;
 export async function startControlPanel(options: ControlPanelOptions = {}): Promise<ControlPanelHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const port = options.port ?? DEFAULT_PORT;
+  if (!isLoopbackHostname(host)) {
+    // The control panel can approve and execute local actions and has no login,
+    // so it must never be reachable from another machine.
+    throw new Error(`Refusing to bind the Conduit control panel to non-loopback host ${host}. Use 127.0.0.1.`);
+  }
   const server = createControlPanelServer(options);
 
   await new Promise<void>((resolve, reject) => {
@@ -70,6 +75,11 @@ export function createControlPanelServer(options: ControlPanelOptions = {}): htt
 
 async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse, clipboard: ClipboardIO): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+  const refusal = refuseNonLocalRequest(req);
+  if (refusal) {
+    sendJson(res, 403, { error: refusal });
+    return;
+  }
   try {
     if (req.method === 'GET' && url.pathname === '/') {
       sendHtml(res, renderAppHtml());
@@ -168,10 +178,19 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         session,
         docsUrl: typeof body.docsUrl === 'string' && body.docsUrl.trim() ? body.docsUrl.trim() : undefined
       });
+      let copied = false;
+      let clipboardError: string | undefined;
       if (body.copy !== false) {
-        await clipboard.write(handshake);
+        try {
+          await clipboard.write(handshake);
+          copied = true;
+        } catch (error) {
+          // No system clipboard (e.g. Linux without pbcopy): the UI shows the
+          // handshake for a manual copy instead of failing after the session exists.
+          clipboardError = error instanceof Error ? error.message : String(error);
+        }
       }
-      sendJson(res, 201, { session, handshake, copied: body.copy !== false });
+      sendJson(res, 201, { session, handshake, copied, clipboardError });
       return;
     }
 
@@ -956,3 +975,53 @@ function escapeHtml(value: string): string {
 function escapeJsString(value: string): string {
   return value.replace(/[\\'"]/g, (char) => `\\${char}`).replace(/\n/g, '\\n').replace(/\r/g, '\\r');
 }
+
+const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+
+export function isLoopbackHostname(hostname: string): boolean {
+  return LOOPBACK_HOSTNAMES.has(hostname.toLowerCase());
+}
+
+/**
+ * Browser-facing guard for the local control API. Binding to 127.0.0.1 keeps
+ * other machines out, but any web page the user visits can still send requests
+ * to loopback. Refuse:
+ * - Host headers that are not loopback (DNS-rebinding pages), and
+ * - state-changing requests carrying a foreign Origin or a cross-site
+ *   Sec-Fetch-Site (cross-site form/fetch posts that could approve or run work).
+ * Non-browser clients (the macOS menu-bar app, curl, tests) send no Origin and
+ * are unaffected.
+ */
+export function refuseNonLocalRequest(req: http.IncomingMessage): string | null {
+  const hostHeader = req.headers.host;
+  if (hostHeader) {
+    let hostname: string;
+    try {
+      hostname = new URL(`http://${hostHeader}`).hostname;
+    } catch {
+      return 'Invalid Host header.';
+    }
+    if (!isLoopbackHostname(hostname)) {
+      return 'Conduit Control only answers requests addressed to a loopback host.';
+    }
+  }
+
+  const method = (req.method ?? 'GET').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    return null;
+  }
+
+  const fetchSite = req.headers['sec-fetch-site'];
+  if (typeof fetchSite === 'string' && fetchSite !== 'same-origin' && fetchSite !== 'none') {
+    return 'Cross-site requests cannot change Conduit state.';
+  }
+
+  const origin = req.headers.origin;
+  if (typeof origin === 'string' && origin.length > 0) {
+    if (!hostHeader || origin !== `http://${hostHeader}`) {
+      return 'Cross-origin requests cannot change Conduit state.';
+    }
+  }
+  return null;
+}
+

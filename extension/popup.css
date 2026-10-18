@@ -1,12 +1,42 @@
+/* Conduit Bridge popup. Same palette as the control panel and website. */
 :root {
   color-scheme: light;
-  --bg: #f7f8f8;
+  --bg: #f5f4f0;
   --panel: #ffffff;
-  --text: #182228;
-  --muted: #66737c;
-  --border: #dce3e7;
+  --panel-2: #faf9f6;
+  --text: #17181b;
+  --muted: #6b6f78;
+  --border: #e4e1d8;
+  --border-strong: #d3cfc4;
   --accent: #0f766e;
+  --accent-ink: #ffffff;
+  --accent-soft: #e2f1ee;
+  --accent-line: #a9d7ce;
+  --warn: #9a5507;
   --danger: #b42318;
+  --danger-soft: #fdecea;
+  --danger-line: #f1b8b2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #0e1012;
+    --panel: #171a1e;
+    --panel-2: #1b1f24;
+    --text: #eceef0;
+    --muted: #949aa3;
+    --border: #262b31;
+    --border-strong: #353b43;
+    --accent: #2fc4a6;
+    --accent-ink: #052620;
+    --accent-soft: rgba(47, 196, 166, 0.11);
+    --accent-line: rgba(47, 196, 166, 0.34);
+    --warn: #f0b04a;
+    --danger: #f27a6e;
+    --danger-soft: rgba(242, 122, 110, 0.10);
+    --danger-line: rgba(242, 122, 110, 0.36);
+  }
 }
 
 * {
@@ -14,11 +44,12 @@
 }
 
 body {
-  width: 330px;
+  width: 340px;
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font: 13px/1.45 "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 main {
@@ -35,33 +66,38 @@ footer {
 
 h1 {
   margin: 0;
-  font-size: 16px;
-  letter-spacing: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 #stateBadge {
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 3px 8px;
+  padding: 2px 9px;
   color: var(--muted);
   background: var(--panel);
+  font-size: 11.5px;
+  font-weight: 650;
 }
 
 #stateBadge.ok {
   color: var(--accent);
-  border-color: #9bd4cb;
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
 }
 
 #stateBadge.error {
   color: var(--danger);
-  border-color: #f2b8b5;
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
 }
 
 section {
-  margin-top: 12px;
+  margin-top: 10px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 11px;
   background: var(--panel);
 }
 
@@ -74,12 +110,19 @@ section {
 .summary b {
   display: block;
   font-size: 18px;
+  letter-spacing: -0.01em;
 }
 
 .summary span,
 dt {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11.5px;
+}
+
+dt {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 650;
 }
 
 dl {
@@ -87,7 +130,7 @@ dl {
 }
 
 dt {
-  margin-top: 8px;
+  margin-top: 9px;
 }
 
 dt:first-child {
@@ -100,12 +143,21 @@ dd {
 }
 
 .attention {
-  border-color: #f2b8b5;
+  border-color: var(--danger-line);
 }
 
 .attention strong,
 .desktop strong {
   color: var(--danger);
+}
+
+.desktop {
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+}
+
+.desktop strong {
+  color: var(--warn);
 }
 
 .attention p,
@@ -119,16 +171,18 @@ dd {
 }
 
 button {
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
   background: var(--panel);
   color: var(--text);
-  padding: 7px 10px;
+  padding: 6px 11px;
+  font: inherit;
+  font-weight: 600;
   cursor: pointer;
 }
 
 #retryButton {
-  color: #ffffff;
+  color: var(--accent-ink);
   border-color: var(--accent);
   background: var(--accent);
 }
@@ -138,14 +192,20 @@ button {
   align-items: center;
   justify-content: center;
   border: 1px solid var(--accent);
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--accent);
-  color: #ffffff;
-  padding: 7px 10px;
+  color: var(--accent-ink);
+  padding: 6px 11px;
+  font-weight: 600;
   text-decoration: none;
+}
+
+footer {
+  margin-top: 12px;
 }
 
 footer a {
   color: var(--accent);
+  font-weight: 600;
   text-decoration: none;
 }

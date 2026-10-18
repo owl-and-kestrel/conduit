@@ -476,7 +476,6 @@ website/download.html
 website/about.html
 website/api.html
 website/assets/site.css
-website/assets/conduit-preview.svg
 tests/website/web-presence.test.ts
 ```
 

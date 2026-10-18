@@ -71,7 +71,9 @@ hdiutil create \
   -format UDZO \
   "$DMG_PATH"
 
-shasum -a 256 "$DMG_PATH" > "$CHECKSUM_PATH"
+# Record the bare filename (not this machine's path) so `shasum -c` works
+# from wherever the DMG is downloaded.
+(cd "$DIST_DIR" && shasum -a 256 "$DMG_FILENAME") > "$CHECKSUM_PATH"
 DMG_SHA256="$(awk '{print $1}' "$CHECKSUM_PATH")"
 DMG_SIZE_BYTES="$(stat -f%z "$DMG_PATH")"
 

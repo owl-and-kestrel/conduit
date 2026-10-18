@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Download Conduit</title>
   <meta name="description" content="Install and run the Conduit local daemon and control app.">
   <link rel="stylesheet" href="assets/site.css">
@@ -15,19 +16,20 @@
       <a aria-current="page" href="download.html">Download</a>
       <a href="about.html">About</a>
       <a href="api.html">API</a>
+      <a href="https://github.com/owl-and-kestrel/conduit">GitHub</a>
     </nav>
   </header>
   <main class="page">
     <h1>Download Conduit</h1>
-    <p class="lead">The v0 install path is a macOS app: download the DMG, drag Conduit into Applications, then launch it from the menu bar. Conduit checks the Owl & Kestrel release channel for signed update manifests, verifies downloaded artifacts, and installs trusted updates in place.</p>
+    <p class="lead">The v0 install path is a macOS app: download the DMG, drag Conduit into Applications, then launch it from the menu bar. The current build is a preview: the app is not yet code-signed or notarized by Apple. Update manifests are signed by Owl + Kestrel, and the menu-bar app verifies the manifest and the DMG checksum before it installs anything.</p>
     <div class="actions">
       <a class="button primary" href="https://github.com/owl-and-kestrel/conduit/releases">Download for macOS</a>
       <a class="button" href="https://github.com/owl-and-kestrel/conduit">Source and checksums</a>
     </div>
     <div class="callout">
-      <p>The DMG contains <code>Conduit.app</code>, an <code>Applications</code> shortcut, release notes, and first-launch guidance. Preview builds may still require right-click <strong>Open</strong> before macOS will launch them.</p>
+      <p>The DMG contains <code>Conduit.app</code>, an <code>Applications</code> shortcut, release notes, and first-launch guidance. Because the preview is unsigned and not notarized, macOS will ask you to right-click <strong>Open</strong> (or allow it in Privacy &amp; Security) the first time. Check the published SHA-256 before you do.</p>
     </div>
-    <div class="callout">
+    <div class="callout info">
       <p>Do not enable embedded-block parsing for normal clipboard use. Compliance mode should remain exact-envelope-only unless you are deliberately testing an unsafe profile.</p>
     </div>
     <section class="grid" aria-label="Download status">
@@ -41,7 +43,7 @@
       </article>
       <article class="card">
         <h3>Windows and Linux</h3>
-        <p>Preview packages now carry launchers and platform metadata. Native tray/status shells are next, using the same approvals, health, updates, and bug-report contract.</p>
+        <p>Preview packages now carry launchers and platform metadata. Native tray/status shells are next, using the same approvals, health, updates, and bug-report contract. Today the CLI and control panel run from source on Linux; clipboard capture is macOS-only.</p>
       </article>
     </section>
     <section class="download-steps" aria-label="Install steps">
@@ -109,7 +111,7 @@ npm run macos:package
 open dist/macos/Conduit.dmg</pre>
     </section>
   </main>
-  <footer class="footer">Conduit v0 is local-first and intentionally conservative by default.</footer>
+  <footer class="footer"><span>Conduit v0 is local-first and intentionally conservative by default.</span><span>An Owl + Kestrel project / <a href="https://github.com/owl-and-kestrel/conduit">Source</a></span></footer>
   <script>
     const request = document.getElementById('extensionConduitRequest').textContent;
     const bytes = new TextEncoder().encode(request);

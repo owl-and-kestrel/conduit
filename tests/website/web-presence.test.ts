@@ -19,8 +19,7 @@ describe('web presence', () => {
   it('keeps navigation links valid across the static site', async () => {
     const knownFiles = new Set([
       ...pages,
-      'assets/site.css',
-      'assets/conduit-preview.svg'
+      'assets/site.css'
     ]);
 
     for (const page of pages) {

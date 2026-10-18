@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Conduit API</title>
   <meta name="description" content="Conduit request envelope and local control API overview.">
   <link rel="stylesheet" href="assets/site.css">
@@ -15,6 +16,7 @@
       <a href="download.html">Download</a>
       <a href="about.html">About</a>
       <a aria-current="page" href="api.html">API</a>
+      <a href="https://github.com/owl-and-kestrel/conduit">GitHub</a>
     </nav>
   </header>
   <main class="page">
@@ -45,7 +47,7 @@
       </article>
       <article class="card">
         <h3>Local app API</h3>
-        <p><code>GET /api/status</code>, <code>GET /api/sessions</code>, <code>POST /api/sessions</code>, <code>POST /api/clipboard/check</code>, and run result endpoints back the control app.</p>
+        <p><code>GET /api/status</code>, <code>GET /api/sessions</code>, <code>POST /api/sessions</code>, <code>POST /api/clipboard/check</code>, approvals, and run result endpoints back the control app. It listens on 127.0.0.1 only and refuses cross-origin writes.</p>
       </article>
       <article class="card">
         <h3>Result format</h3>
@@ -56,6 +58,6 @@
       <p>Duplicate JSON keys, comments, trailing commas, missing source metadata, and missing permission declarations are rejected for clipboard execution.</p>
     </div>
   </main>
-  <footer class="footer">Exact envelope parsing is the default API contract, not a UI preference.</footer>
+  <footer class="footer"><span>Exact envelope parsing is the default API contract, not a UI preference.</span><span>An Owl + Kestrel project / <a href="https://github.com/owl-and-kestrel/conduit">Source</a></span></footer>
 </body>
 </html>

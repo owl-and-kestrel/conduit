@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Conduit</title>
-  <meta name="description" content="Conduit is a local consent layer for clipboard and agent-loop commands.">
+  <meta name="description" content="Conduit is a local consent layer for clipboard and agent-loop commands: a chatbot asks, you see exactly what it wants, and nothing runs until you approve it.">
   <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
@@ -15,20 +16,51 @@
       <a href="download.html">Download</a>
       <a href="about.html">About</a>
       <a href="api.html">API</a>
+      <a href="https://github.com/owl-and-kestrel/conduit">GitHub</a>
     </nav>
   </header>
   <main>
     <section class="hero">
       <div>
+        <div class="eyebrow">
+          <span class="tag ok">Local-first</span>
+          <span class="tag">Apache-2.0</span>
+          <span class="tag warn">Preview: unsigned, not notarized</span>
+        </div>
         <h1>Copy the request. Only the request.</h1>
         <p class="lead">Conduit is a local runner for explicit, inspectable requests from chatbots, docs, and paired sessions. It gives clipboard workflows a consent boundary that is less cursed than pasting arbitrary shell into a terminal.</p>
         <div class="actions">
           <a class="button primary" href="download.html">Get Conduit</a>
           <a class="button" href="api.html">Read the API</a>
         </div>
+        <p class="fine">A macOS menu-bar app, plus a TypeScript CLI and control panel that also run on Linux. Clipboard capture is macOS-only for now.</p>
       </div>
-      <img class="preview" src="assets/conduit-preview.svg" alt="Preview of the Conduit local control app">
+      <figure class="consent-demo" aria-label="Example: Conduit asking before it runs an untrusted request" style="margin:0">
+        <div class="cd-top"><span class="cd-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Conduit Control / Approvals</span></div>
+        <div class="cd-head">
+          <div class="cd-tags"><span class="pill warn">Untrusted source</span><span class="pill danger">high risk</span></div>
+          <h3>Summarize notes and recent changes</h3>
+          <p>Copied from a chat reply. Conduit stopped it because there is no paired session.</p>
+        </div>
+        <div class="cd-grid">
+          <div>
+            <p class="cd-label">What it may touch</p>
+            <span class="cd-chip">filesystem:project:read</span><span class="cd-chip">git:project:read</span>
+          </div>
+          <div>
+            <p class="cd-label">What it will do</p>
+            <ul class="cd-actions">
+              <li>file.list <span>notes</span></li>
+              <li>file.read <span>notes/index.md</span></li>
+              <li>git.diff <span>since last commit</span></li>
+            </ul>
+          </div>
+        </div>
+        <p class="cd-note">Approve once runs under read-only local policy. It does not create a trusted session.</p>
+        <div class="cd-foot"><span class="cd-btn deny">Deny</span><span class="cd-btn approve">Approve once</span></div>
+      </figure>
     </section>
+
     <section class="band">
       <div class="section split">
         <div>
@@ -51,14 +83,39 @@
         </div>
       </div>
     </section>
+
     <section class="section">
-      <h2>The useful unsafe thing, boxed up.</h2>
-      <p class="lead">Conduit keeps the agent loop available for elevated authenticated sessions, while the default clipboard gesture stays narrow: copy the Conduit request, and only the Conduit request.</p>
-      <pre class="code">npm run conduit -- session create --label "ChatGPT" --root /path/to/project
+      <h2>How a request travels.</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="num">1</span>
+          <h3>An agent asks</h3>
+          <p>A chat model emits one fenced <code>conduit</code> block: schema, source, declared permissions, and stable action IDs.</p>
+        </article>
+        <article class="card">
+          <span class="num">2</span>
+          <h3>You copy only that block</h3>
+          <p>The clipboard watcher sees an exact envelope. Without a paired session it becomes a review, never a silent run.</p>
+        </article>
+        <article class="card">
+          <span class="num">3</span>
+          <h3>Policy, then you, then results</h3>
+          <p>Local policy checks roots and profiles, you approve or deny, and results come back as a block to paste into the chat.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="section">
+        <h2>The useful unsafe thing, boxed up.</h2>
+        <p class="lead">Conduit keeps the agent loop available for elevated authenticated sessions, while the default clipboard gesture stays narrow: copy the Conduit request, and only the Conduit request.</p>
+        <pre class="code"><span class="c"># from a source checkout (Node 20+)</span>
+npm run conduit -- session create --label "ChatGPT" --root /path/to/project
 npm run conduit -- daemon start --interval-ms 1000
 npm run app</pre>
+      </div>
     </section>
   </main>
-  <footer class="footer">Conduit is local-first v0 software. Treat every capability boundary as load-bearing.</footer>
+  <footer class="footer"><span>Conduit is local-first v0 software. Treat every capability boundary as load-bearing.</span><span>An Owl + Kestrel project / <a href="https://github.com/owl-and-kestrel/conduit">Source</a></span></footer>
 </body>
 </html>

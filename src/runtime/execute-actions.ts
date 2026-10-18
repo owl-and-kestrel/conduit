@@ -12,6 +12,7 @@ import { evaluateActionPolicy } from '../policy/policy-engine.js';
 import type { ToolAction, ToolResult } from '../protocol/schemas.js';
 import type { ConduitSession } from '../sessions/session-store.js';
 import { appendJsonl } from '../state/logs.js';
+import { checkExecutionGate } from '../state/pause-state.js';
 import { getTool } from '../tools/registry.js';
 import { executeToolAction } from '../tools/types.js';
 
@@ -38,6 +39,14 @@ export async function executeActions(input: ExecuteActionsInput): Promise<ToolRe
       timestamp: new Date().toISOString()
     });
 
+    // Pause gate before policy: a paused runtime creates no ask. This also
+    // covers --yes and trusted auto-runs, which never reach a confirmation.
+    const pausedBeforePolicy = await pausedResult(action, input, policySession.sessionId);
+    if (pausedBeforePolicy) {
+      results.push(pausedBeforePolicy);
+      continue;
+    }
+
     const policyDecision = await evaluateActionPolicy({
       action,
       session: policySession
@@ -60,6 +69,14 @@ export async function executeActions(input: ExecuteActionsInput): Promise<ToolRe
     });
     if (policyResult) {
       results.push(policyResult);
+      continue;
+    }
+
+    // Gate again immediately before the tool runs: a pause (or session pause or
+    // revoke) that landed while an ask was pending still wins over the approval.
+    const pausedBeforeTool = await pausedResult(action, input, policySession.sessionId);
+    if (pausedBeforeTool) {
+      results.push(pausedBeforeTool);
       continue;
     }
 
@@ -86,6 +103,30 @@ export async function executeActions(input: ExecuteActionsInput): Promise<ToolRe
   }
 
   return results;
+}
+
+async function pausedResult(
+  action: ToolAction,
+  input: Pick<ExecuteActionsInput, 'runDir' | 'turn'>,
+  sessionId: string
+): Promise<ToolResult | null> {
+  const gate = await checkExecutionGate(sessionId);
+  if (gate.ok) return null;
+  await appendJsonl(input.runDir, 'policy-decisions.jsonl', {
+    turn: input.turn,
+    actionId: action.id,
+    tool: action.tool,
+    decision: 'deny',
+    reason: gate.reason,
+    decidedBy: gate.scope === 'global' ? 'pause' : 'session-pause',
+    timestamp: new Date().toISOString()
+  });
+  return {
+    id: action.id,
+    tool: action.tool,
+    status: 'denied',
+    error: gate.reason
+  };
 }
 
 async function handlePolicyDecision(

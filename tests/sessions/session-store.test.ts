@@ -98,7 +98,8 @@ describe('session store', () => {
 
     await expect(validateSessionNonce(active.sessionId, active.currentNonce)).resolves.toEqual({
       ok: false,
-      reason: 'Session is revoked.'
+      reason: 'Session is revoked.',
+      sessionState: 'revoked'
     });
 
     const expired = await createSession({
@@ -110,7 +111,8 @@ describe('session store', () => {
 
     await expect(validateSessionNonce(expired.sessionId, expired.currentNonce)).resolves.toEqual({
       ok: false,
-      reason: 'Session is expired.'
+      reason: 'Session is expired.',
+      sessionState: 'expired'
     });
   });
 });

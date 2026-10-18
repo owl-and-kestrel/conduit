@@ -33,7 +33,7 @@ export interface CreateSessionInput {
 
 export type SessionNonceValidation =
   | { ok: true; session: ConduitSession }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; sessionState?: ConduitSession['state'] };
 
 const ConduitSessionSchema: z.ZodType<ConduitSession> = z.object({
   sessionId: z.string().min(1),
@@ -90,6 +90,47 @@ export async function revokeSession(sessionId: string): Promise<ConduitSession> 
   }));
 }
 
+/**
+ * Per-session pause (spec S1). Reuses the `paused` session state: a paused
+ * session fails nonce validation and the runtime gate, so nothing runs for it,
+ * but its nonce and grants are kept so `resumeSession` restores it unchanged.
+ * Only an active session can be paused; pausing a paused session is a no-op.
+ */
+export async function pauseSession(sessionId: string): Promise<ConduitSession> {
+  return updateSession(sessionId, (session) => {
+    if (session.state === 'paused') return session;
+    if (session.state !== 'active') {
+      throw new Error(`Cannot pause a ${session.state} session.`);
+    }
+    return { ...session, state: 'paused' };
+  });
+}
+
+/** Resumes a paused session. Revoked or expired sessions never come back. */
+export async function resumeSession(sessionId: string): Promise<ConduitSession> {
+  return updateSession(sessionId, (session) => {
+    if (session.state === 'active') return session;
+    if (session.state !== 'paused') {
+      throw new Error(`Cannot resume a ${session.state} session.`);
+    }
+    return { ...session, state: 'active' };
+  });
+}
+
+/** Revokes every session that could still run work. Used by stop-all (kill). */
+export async function revokeAllLiveSessions(): Promise<ConduitSession[]> {
+  const store = await readSessionStore();
+  const revoked: ConduitSession[] = [];
+  store.sessions = store.sessions.map((session) => {
+    if (session.state === 'revoked' || session.state === 'expired') return session;
+    const updated: ConduitSession = { ...session, state: 'revoked' };
+    revoked.push(updated);
+    return updated;
+  });
+  await writeSessionStore(store);
+  return revoked;
+}
+
 export async function validateSessionNonce(sessionId: string, nonce: string): Promise<SessionNonceValidation> {
   const session = await getSession(sessionId);
   if (!session) {
@@ -97,11 +138,11 @@ export async function validateSessionNonce(sessionId: string, nonce: string): Pr
   }
 
   if (session.state !== 'active') {
-    return { ok: false, reason: `Session is ${session.state}.` };
+    return { ok: false, reason: `Session is ${session.state}.`, sessionState: session.state };
   }
 
   if (session.expiresAt && Date.parse(session.expiresAt) <= Date.now()) {
-    return { ok: false, reason: 'Session is expired.' };
+    return { ok: false, reason: 'Session is expired.', sessionState: 'expired' };
   }
 
   if (session.usedNonces.includes(nonce)) {

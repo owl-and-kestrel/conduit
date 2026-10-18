@@ -41,7 +41,11 @@ export function createRepairEnvelope(input: {
         'A single raw JSON Conduit request object.'
       ]
     },
-    repairInstructions: [
+    repairInstructions: input.code === 'paused' ? [
+      'The local user paused Conduit. Nothing ran and no approval was requested.',
+      'Do not retry in a loop. Tell the user the request is waiting, and resend the same request after they resume Conduit.',
+      'The session nonce was not consumed, so the same sessionId and nonce stay valid after resume.'
+    ] : [
       'Emit exactly one fenced ```conduit code block containing the repaired request JSON, with no surrounding prose inside the block.',
       'Use strict JSON: no comments, trailing commas, duplicate object keys, or markdown inside the JSON.',
       'Include schema: conduit.request.v1.',

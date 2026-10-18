@@ -8,6 +8,7 @@ import { createRepairEnvelope } from '../protocol/repair.js';
 import type { FinalBlock, ToolResult } from '../protocol/schemas.js';
 import { consumeSessionNonce, getSession, validateSessionNonce } from '../sessions/session-store.js';
 import { getRunDir } from '../state/paths.js';
+import { checkExecutionGate } from '../state/pause-state.js';
 import { appendJsonl, ensureRunDir, writeTextFile } from '../state/logs.js';
 import type { AssistantTurn, ModelTransport } from '../transports/types.js';
 import { createRunId } from '../util/ids.js';
@@ -119,6 +120,23 @@ export async function processListenTurn(input: {
   }
 
   if (actionsResult.ok) {
+    // Pause gate before the nonce is consumed, so the agent can resend the
+    // same request after resume. executeActions gates again per action.
+    const gate = await checkExecutionGate();
+    if (!gate.ok) {
+      const session = await ensureSession(input.session, input.projectRoot);
+      await logAssistantTurn(session, input.assistantTurn);
+      const repair = renderConduitRepair(createRepairEnvelope({
+        reason: gate.reason,
+        code: 'paused',
+        request: actionsResult.block,
+        ...(actionsResult.block.sessionId ? { sessionId: actionsResult.block.sessionId } : {})
+      }));
+      await input.transport.sendMessage(repair);
+      await logUserMessage(session, repair);
+      return { status: 'protocol_error', session };
+    }
+
     const trusted = input.requireTrustedSession
       ? await validateAndConsumeAgentRequest(actionsResult.block)
       : null;
@@ -194,8 +212,10 @@ async function validateAndConsumeAgentRequest(request: {
     return {
       ok: false,
       repair: createRepairEnvelope({
-        reason: validation.reason,
-        code: 'invalid_session',
+        reason: validation.sessionState === 'paused'
+          ? `Session ${request.sessionId} is paused. Nothing runs for it until it is resumed.`
+          : validation.reason,
+        code: validation.sessionState === 'paused' ? 'paused' : 'invalid_session',
         request,
         sessionId: request.sessionId,
         ...(session?.state === 'active' ? { currentNonce: session.currentNonce } : {})

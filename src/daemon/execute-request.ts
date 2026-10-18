@@ -8,6 +8,7 @@ import { ActionRequestBlockSchema, type ActionRequestBlock, type ToolResult } fr
 import type { ConduitSession } from '../sessions/session-store.js';
 import { consumeSessionNonce, validateSessionNonce } from '../sessions/session-store.js';
 import { getRunDir } from '../state/paths.js';
+import { checkExecutionGate } from '../state/pause-state.js';
 import { ensureRunDir, writeTextFile } from '../state/logs.js';
 import { createRunId } from '../util/ids.js';
 import { executeActions } from '../runtime/execute-actions.js';
@@ -82,6 +83,13 @@ export async function executeConduitRequest(
   request: ActionRequestBlock,
   options: Pick<ExecuteRequestInput, 'yes' | 'confirm'> = {}
 ): Promise<ExecuteRequestOutput> {
+  // Pause gate first: while paused nothing runs, no review or ask is created,
+  // and no nonce is consumed (the same envelope is valid again after resume).
+  const gate = await checkExecutionGate();
+  if (!gate.ok) {
+    return pausedOutput(request, gate.reason);
+  }
+
   if (!request.sessionId || !request.nonce) {
     const review = await createUntrustedRequestReview(request, 'Request is not attached to a trusted session.');
     return {
@@ -102,6 +110,10 @@ export async function executeConduitRequest(
       reason: 'Request references an unknown session. Local review is required before execution.',
       rendered: renderReviewRequired(review.approvalId, request)
     };
+  }
+
+  if (!validation.ok && validation.sessionState === 'paused') {
+    return pausedOutput(request, `Session ${request.sessionId} is paused. Nothing runs for it until it is resumed.`);
   }
 
   if (!validation.ok) {
@@ -187,6 +199,14 @@ export async function executeApprovedReview(
     };
   }
 
+  const gate = await checkExecutionGate();
+  if (!gate.ok) {
+    return {
+      ...pausedOutput({}, gate.reason),
+      approvalId: approval.approvalId
+    };
+  }
+
   const args = approval.action.args as Record<string, unknown>;
   const actions = Array.isArray(args.actions) ? args.actions as ActionRequestBlock['actions'] : [];
   if (actions.length === 0) {
@@ -247,6 +267,22 @@ export async function executeApprovedReview(
     sessionId: policySession.sessionId,
     results,
     rendered
+  };
+}
+
+function pausedOutput(request: Partial<ActionRequestBlock>, reason: string): ExecuteRequestOutput {
+  const repair = createRepairEnvelope({
+    reason,
+    code: 'paused',
+    request,
+    ...(request.sessionId ? { sessionId: request.sessionId } : {})
+  });
+  return {
+    status: 'rejected',
+    ...(request.sessionId ? { sessionId: request.sessionId } : {}),
+    reason: repair.reason,
+    repair,
+    rendered: renderConduitRepair(repair)
   };
 }
 

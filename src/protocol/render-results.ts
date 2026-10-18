@@ -55,6 +55,7 @@ export interface ConduitRepairEnvelope {
     | 'invalid_session'
     | 'invalid_schema'
     | 'invalid_permissions'
+    | 'paused'
     | 'request_rejected';
   sessionId?: string;
   currentNonce?: string;

@@ -90,8 +90,10 @@ describe('macOS menu-bar package scaffold', () => {
     const script = await readText('script/build_and_run.sh');
     expect(script).toContain('SWIFT_BUILD_DIR="${CONDUIT_SWIFT_BUILD_DIR:-${TMPDIR:-/tmp}/conduit-menubar-build}"');
     expect(script).toContain('swift build --package-path "$PACKAGE_DIR" --scratch-path "$SWIFT_BUILD_DIR"');
-    expect(script).toContain('src/cli/index.ts daemon start');
-    expect(script).toContain('src/cli/index.ts listen --project');
+    // Run modes stop this checkout's app and its child processes (the supervised
+    // services) by process tree, never by command-line pattern (review F-01).
+    expect(script).toContain('descendant_pids "$pid"');
+    expect(script).not.toContain('pkill');
     expect(script).toContain('LSUIElement');
     expect(script).toContain('CFBundleURLTypes');
     expect(script).toContain('<string>conduit</string>');

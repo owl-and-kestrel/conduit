@@ -961,7 +961,7 @@ npm run macos:build
 npm run macos:run
 ```
 
-The local preview stages `dist/macos/Conduit.app`, supervises the Node control app, extension agent listener, and clipboard daemon, and checks `website/releases/conduit-appcast.json` unless `CONDUIT_UPDATE_MANIFEST_URL` is set. Supervised services receive `CONDUIT_PARENT_PID` and exit if that menu-bar parent disappears, so closing the app cannot leave local execution processes running silently. The local build/run script also sweeps legacy Conduit service processes from the same checkout that were launched before supervision existed.
+The local preview stages `dist/macos/Conduit.app`, supervises the Node control app, extension agent listener, and clipboard daemon, and checks `website/releases/conduit-appcast.json` unless `CONDUIT_UPDATE_MANIFEST_URL` is set. Supervised services receive `CONDUIT_PARENT_PID` and exit if that menu-bar parent disappears, so closing the app cannot leave local execution processes running silently. Run modes of the local build/run script stop only the app running from this checkout's bundle and that app's child processes (exact executable path, then its process tree, never a name or command-line pattern); `--build-only` stops nothing.
 
 Agent-loop handshake:
 

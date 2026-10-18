@@ -49,36 +49,64 @@ this_checkout_app_pids() {
   done
 }
 
+# Prints every process descended from the given pid, depth first: the same
+# walk as the app's own ProcessTree.descendants in Supervisor.swift.
+descendant_pids() {
+  local child
+  for child in $(/usr/bin/pgrep -P "$1" || true); do
+    echo "$child"
+    descendant_pids "$child"
+  done
+}
+
+# Succeeds while any of the given pids is still running.
+any_alive() {
+  local pid
+  for pid in "$@"; do
+    kill -0 "$pid" 2>/dev/null && return 0
+  done
+  return 1
+}
+
 # Run modes replace and relaunch this checkout's app, so they stop the app
-# running from this checkout's bundle, plus legacy service processes started
-# from this same checkout before supervision existed (their command line names
-# $ROOT). --build-only never calls this.
+# running from this checkout's bundle together with its child processes (the
+# control app, agent listener and clipboard daemon it supervises), the same
+# process tree the app stops on Quit. The tree is snapshotted before any
+# signal. Nothing is matched by name or command-line pattern, so another
+# checkout's app and services, an installed Conduit and services started by
+# hand keep running. The supervised services would also exit on their own
+# through CONDUIT_PARENT_PID once the app is gone; stopping them here means the
+# relaunched app does not find the old control app still holding port 47831.
+# --build-only never calls this.
 stop_this_checkout_app() {
-  local pids
-  pids="$(this_checkout_app_pids | /usr/bin/tr '\n' ' ')"
-  pids="${pids% }"
+  local app_pids child_pids pid
+  app_pids="$(this_checkout_app_pids | /usr/bin/tr '\n' ' ')"
+  app_pids="${app_pids% }"
+  child_pids=""
+  for pid in $app_pids; do
+    child_pids="$child_pids $(descendant_pids "$pid" | /usr/bin/tr '\n' ' ')"
+  done
+  # shellcheck disable=SC2086 # word splitting collapses the spaces
+  child_pids="$(echo $child_pids)"
   if [ "$DRY_RUN" = "1" ]; then
-    echo "Dry run: would stop this checkout's app: ${pids:-none}"
-    echo "Dry run: would stop legacy service processes whose command line names $ROOT"
+    echo "Dry run: would stop this checkout's app: ${app_pids:-none}"
+    echo "Dry run: would stop the app's child processes: ${child_pids:-none}"
     return 0
   fi
-  if [ -n "$pids" ]; then
-    # shellcheck disable=SC2086 # one pid per word
-    kill -TERM $pids 2>/dev/null || true
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-      [ -z "$(this_checkout_app_pids)" ] && break
-      sleep 0.5
-    done
-    if [ -n "$(this_checkout_app_pids)" ]; then
-      echo "Warning: $APP_NAME from $APP_BUNDLE did not exit within 5 s." >&2
-    fi
+  if [ -z "$app_pids" ]; then
+    return 0
   fi
-  /usr/bin/pkill -TERM -f "$ROOT.*src/cli/index.ts app start --port 47831" >/dev/null 2>&1 || true
-  /usr/bin/pkill -TERM -f "$ROOT.*src/cli/index.ts daemon start" >/dev/null 2>&1 || true
-  /usr/bin/pkill -TERM -f "$ROOT.*src/cli/index.ts listen --project" >/dev/null 2>&1 || true
-  /usr/bin/pkill -TERM -f "$ROOT.*dist/cli/index.js app start --port 47831" >/dev/null 2>&1 || true
-  /usr/bin/pkill -TERM -f "$ROOT.*dist/cli/index.js daemon start" >/dev/null 2>&1 || true
-  /usr/bin/pkill -TERM -f "$ROOT.*dist/cli/index.js listen --project" >/dev/null 2>&1 || true
+  # shellcheck disable=SC2086 # one pid per word
+  kill -TERM $child_pids $app_pids 2>/dev/null || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    # shellcheck disable=SC2086 # one pid per word
+    [ -z "$(this_checkout_app_pids)" ] && ! any_alive $child_pids && break
+    sleep 0.5
+  done
+  # shellcheck disable=SC2086 # one pid per word
+  if [ -n "$(this_checkout_app_pids)" ] || any_alive $child_pids; then
+    echo "Warning: $APP_NAME from $APP_BUNDLE or one of its child processes did not exit within 5 s." >&2
+  fi
 }
 
 stage_bundle() {

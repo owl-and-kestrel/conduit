@@ -21,10 +21,12 @@ Next, in rough priority order:
    build machine's absolute path (fixed for future builds in
    `script/package_dmg.sh`), and the owlandkestrel.com release redirects still
    go through the old jon-vs-moloch repository URL.
-4. `script/build_and_run.sh` and the Swift supervisor match
+4. The Swift supervisor (`PortListeners` in `Supervisor.swift`) matches
    `dist/cli/index.js` in process command lines, but the build emits
    `dist/src/cli/index.js`. Harmless today (the app runs the CLI through
-   `npm run conduit`), but the matchers should follow the real path.
+   `npm run conduit`), but the matcher should follow the real path.
+   `script/build_and_run.sh` no longer matches command lines: its run modes
+   stop only this checkout's app and that app's child processes.
 
 The gate log below is the build history. Read it for context; the list above
 is the current queue.
@@ -553,7 +555,7 @@ Behavior:
 - starts supervised services by default when the menu-bar app launches
 - asks for confirmation before quitting and stopping supervised services
 - passes a parent PID deadman switch to supervised services, so they exit if the menu-bar app disappears
-- sweeps legacy service processes from the same checkout when using the local build/run script
+- run modes of the local build/run script stop only this checkout's app and its child processes (until 2026-10-18 they also swept legacy service processes by command-line pattern, which could reach a sibling checkout's services)
 - checks a local update manifest by default
 - allows `CONDUIT_UPDATE_MANIFEST_URL` to point at a future hosted manifest
 - copies a fresh agent-loop handshake into the clipboard for real ChatGPT tab testing

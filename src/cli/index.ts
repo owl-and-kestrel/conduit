@@ -13,11 +13,20 @@ import { getStateRoot } from '../state/paths.js';
 import { ACTIONS_END, ACTIONS_START, END_TURN, FINAL_END, FINAL_START } from '../protocol/delimiters.js';
 import { runAuthDoctor } from './auth-doctor.js';
 import { exec } from 'node:child_process';
-import { createSession, listSessions, revokeSession } from '../sessions/session-store.js';
+import { createSession, listSessions, pauseSession, resumeSession, revokeSession } from '../sessions/session-store.js';
 import { isPermissionProfileName } from '../sessions/profiles.js';
 import { runClipboardDaemon } from '../daemon/daemon.js';
 import { startControlPanel } from '../app/control-panel.js';
 import { startParentWatchdogFromEnv } from './parent-watchdog.js';
+import { getControlStatus, pauseAll, resumeAll, stopAll } from '../app/control-operations.js';
+import {
+  CLI_ACTOR,
+  ControlClient,
+  formatApprovalDetail,
+  formatApprovalLine,
+  formatControlStatus,
+  formatRunLine
+} from './control-client.js';
 
 const program = new Command();
 startParentWatchdogFromEnv();
@@ -130,6 +139,153 @@ sessionCommand.command('revoke')
   .action(async (sessionId: string) => {
     const session = await revokeSession(sessionId);
     console.log(`Revoked session ${session.sessionId}`);
+  });
+
+// ---- Pause / kill switch (S1) and approvals parity (S2) ---------------------
+// Each verb is one call to the Conduit Control API (see control-client.ts).
+// --local runs the same control operations in-process, for when Control is
+// not running; it is never an automatic fallback.
+
+program.command('status')
+  .description('Show whether Conduit is paused, plus live sessions and pending approvals.')
+  .option('--url <url>', 'Conduit Control URL (default http://127.0.0.1:47831 or CONDUIT_CONTROL_URL)')
+  .option('--local', 'read the state root directly instead of calling Conduit Control', false)
+  .option('--json', 'print the raw API response', false)
+  .action(async (options: { url?: string; local: boolean; json: boolean }) => {
+    const control = options.local
+      ? await getControlStatus()
+      : (await new ControlClient({ url: options.url }).status()).control;
+    console.log(options.json ? JSON.stringify({ control }, null, 2) : formatControlStatus(control));
+  });
+
+program.command('pause')
+  .description('Pause Conduit: nothing runs (including trusted auto-runs) until resumed. With --session, pause one session.')
+  .option('--session <id>', 'pause only this session')
+  .option('--reason <text>', 'why Conduit is paused (shown in status)')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--local', 'write the state root directly instead of calling Conduit Control', false)
+  .option('--json', 'print the raw API response', false)
+  .action(async (options: { session?: string; reason?: string; url?: string; local: boolean; json: boolean }) => {
+    if (options.session) {
+      const result = options.local
+        ? { session: await pauseSession(options.session) }
+        : await new ControlClient({ url: options.url }).pause({ sessionId: options.session });
+      console.log(options.json ? JSON.stringify(result, null, 2) : `Paused session ${result.session.sessionId}.`);
+      return;
+    }
+    const control = options.local
+      ? await pauseAll({ by: CLI_ACTOR, reason: options.reason })
+      : (await new ControlClient({ url: options.url }).pause({ reason: options.reason })).control;
+    console.log(options.json ? JSON.stringify({ control }, null, 2) : formatControlStatus(control));
+  });
+
+program.command('resume')
+  .description('Resume Conduit after a pause. With --session, resume one paused session.')
+  .option('--session <id>', 'resume only this session')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--local', 'write the state root directly instead of calling Conduit Control', false)
+  .option('--json', 'print the raw API response', false)
+  .action(async (options: { session?: string; url?: string; local: boolean; json: boolean }) => {
+    if (options.session) {
+      const result = options.local
+        ? { session: await resumeSession(options.session) }
+        : await new ControlClient({ url: options.url }).resume({ sessionId: options.session });
+      console.log(options.json ? JSON.stringify(result, null, 2) : `Resumed session ${result.session.sessionId}.`);
+      return;
+    }
+    const control = options.local
+      ? await resumeAll({ by: CLI_ACTOR })
+      : (await new ControlClient({ url: options.url }).resume()).control;
+    console.log(options.json ? JSON.stringify({ control }, null, 2) : formatControlStatus(control));
+  });
+
+program.command('stop-all')
+  .description('Kill switch: pause Conduit and revoke every live session.')
+  .option('--reason <text>', 'why everything was stopped')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--local', 'write the state root directly instead of calling Conduit Control', false)
+  .option('--json', 'print the raw API response', false)
+  .action(async (options: { reason?: string; url?: string; local: boolean; json: boolean }) => {
+    const result = options.local
+      ? await stopAll({ by: CLI_ACTOR, reason: options.reason })
+      : await new ControlClient({ url: options.url }).stopAll({ reason: options.reason });
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    console.log(formatControlStatus(result.control));
+    console.log(`Revoked sessions: ${result.revokedSessions.length > 0 ? result.revokedSessions.join(', ') : 'none'}`);
+  });
+
+const approvalsCommand = program.command('approvals')
+  .description('List and decide pending Conduit approvals (same API as the panel and menu bar).');
+
+approvalsCommand.command('list')
+  .description('List approvals, newest first. Pending only unless --all.')
+  .option('--all', 'include decided and expired approvals', false)
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--json', 'print the raw API response', false)
+  .action(async (options: { all: boolean; url?: string; json: boolean }) => {
+    const result = await new ControlClient({ url: options.url }).listApprovals();
+    const approvals = (result.approvals as any[]).filter((approval) => options.all || approval.status === 'pending');
+    if (options.json) {
+      console.log(JSON.stringify({ approvals }, null, 2));
+      return;
+    }
+    console.log(approvals.length === 0
+      ? (options.all ? 'No approvals.' : 'No pending approvals.')
+      : approvals.map(formatApprovalLine).join('\n'));
+  });
+
+approvalsCommand.command('show')
+  .description('Show one approval with its full arguments.')
+  .argument('<approvalId>', 'approval id')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--json', 'print the raw API response', false)
+  .action(async (approvalId: string, options: { url?: string; json: boolean }) => {
+    const result = await new ControlClient({ url: options.url }).showApproval(approvalId);
+    console.log(options.json ? JSON.stringify(result, null, 2) : formatApprovalDetail(result.approval));
+  });
+
+for (const decision of ['approve', 'deny'] as const) {
+  approvalsCommand.command(decision)
+    .description(decision === 'approve'
+      ? 'Approve a pending approval. An untrusted review runs once, read-only, like Approve once in the panel.'
+      : 'Deny a pending approval.')
+    .argument('<approvalId>', 'approval id')
+    .option('--reason <text>', 'decision reason recorded on the approval')
+    .option('--url <url>', 'Conduit Control URL')
+    .option('--json', 'print the raw API response', false)
+    .action(async (approvalId: string, options: { reason?: string; url?: string; json: boolean }) => {
+      const result = await new ControlClient({ url: options.url }).decideApproval(approvalId, decision, options.reason);
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      console.log(formatApprovalLine(result.approval));
+      if (result.execution) {
+        console.log(`Execution: ${result.execution.status}${result.execution.runId ? ` (run ${result.execution.runId})` : ''}`);
+        if (result.copiedToClipboard) console.log('Result copied to the clipboard.');
+        else if (result.execution.rendered) console.log(result.execution.rendered);
+      }
+    });
+}
+
+const runsCommand = program.command('runs')
+  .description('Inspect Conduit runs.');
+
+runsCommand.command('list')
+  .description('List recent runs (last 50), newest first.')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--json', 'print the raw API response', false)
+  .action(async (options: { url?: string; json: boolean }) => {
+    const result = await new ControlClient({ url: options.url }).listRuns();
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    const runs = result.runs as any[];
+    console.log(runs.length === 0 ? 'No runs.' : runs.map(formatRunLine).join('\n'));
   });
 
 program.command('login:system')
@@ -370,4 +526,7 @@ function parseInteger(value: string): number {
   return parsed;
 }
 
-await program.parseAsync();
+await program.parseAsync().catch((error: unknown) => {
+  console.error(`conduit: ${error instanceof Error ? error.message : String(error)}`);
+  process.exitCode = 1;
+});

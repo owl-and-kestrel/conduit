@@ -250,6 +250,18 @@ describe('macOS menu-bar package scaffold', () => {
   });
 });
 
+describe('menu-bar supervisor safety (spec invariant 5)', () => {
+  it('never starts a supervised service with --yes', async () => {
+    const main = await readText('macos/ConduitMenuBar/Sources/ConduitMenuBar/main.swift');
+    const starts = main.match(/\.start\(arguments: \[[^\]]*\]\)/g) ?? [];
+    expect(starts.length).toBeGreaterThanOrEqual(3);
+    for (const start of starts) {
+      expect(start).not.toContain('--yes');
+    }
+    expect(main).not.toContain('"--yes"');
+  });
+});
+
 async function expectExists(file: string): Promise<void> {
   await expect(access(path.resolve(file))).resolves.toBeUndefined();
 }

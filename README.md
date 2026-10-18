@@ -65,6 +65,8 @@ Owl + Kestrel registry configured in `.npmrc`. It needs no login.
 | `npm run spike` | Runs the fake transport end to end against `fixtures/fake-project`. |
 | `npm run doctor` | Checks the local runtime environment. |
 | `npm run conduit -- session create --label Demo --root fixtures/fake-project` | Pairs a session (see `session list`, `session revoke`). |
+| `npm run conduit -- pause` / `resume` / `status` | Pauses or resumes all execution (`--session <id>` for one session); `stop-all` also revokes every session. Add `--local` when Control is not running. |
+| `npm run conduit -- approvals list` | Lists pending approvals; `approvals show|approve|deny <id>` decide them through the same API as the panel. `runs list` lists runs. |
 | `npm run listen` | Starts the extension bridge listener on `127.0.0.1:3333`. |
 | `npm run site:dev` | Serves `website/` on `http://127.0.0.1:47832`. |
 | `npm run build` | Type-checks and compiles to `dist/` (`node dist/src/cli/index.js --help`). |
@@ -120,10 +122,23 @@ returns `nextNonce`. Revoking a session kills its nonce.
 - `shell-manual`: reads run; writes, patches and every `shell.run` wait for
   approval.
 
-Confirmation-required actions create one shared approval record. The terminal
-and the control panel are both approval surfaces for it, and the record stores
-where the decision came from. Hard denials include project-root sandbox
-violations and secret-looking filenames.
+Confirmation-required actions create one shared approval record. The terminal,
+the control panel, the menu bar and the CLI (`conduit approvals`) are all
+approval surfaces for it, and the record stores where the decision came from
+(`decidedBy`). Every approval, including an untrusted-request review, expires
+after 10 minutes; **timeout means deny**, applied whenever the record is read,
+so a stale ask can never be approved late. Hard denials include project-root
+sandbox violations and secret-looking filenames.
+
+**Pause.** `conduit pause` (or `POST /api/control/pause`) sets a flag in the
+state root that every execution path checks before any tool runs, including
+trusted auto-runs and `--yes`. While paused nothing runs, no approval is asked,
+no nonce is consumed, and the agent receives a `paused` repair envelope; a tool
+already running finishes, the rest of its batch does not start. The flag
+survives restarts, and an unreadable flag counts as paused. `--session <id>`
+pauses one session. `conduit stop-all` pauses and revokes every live session.
+Pause and resume exist only on the Origin-guarded control panel, never on the
+extension bridge.
 
 **Local-only API.** Every Conduit service binds `127.0.0.1`. The control panel refuses
 to bind anything else, answers only loopback `Host` headers (DNS rebinding) and

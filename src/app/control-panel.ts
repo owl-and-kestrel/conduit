@@ -5,12 +5,13 @@ import path from 'node:path';
 import { ClipboardWatcher } from '../daemon/clipboard-watcher.js';
 import { MacClipboardIO, type ClipboardIO } from '../daemon/clipboard-io.js';
 import { getRunsRoot, getStateRoot } from '../state/paths.js';
-import { createSession, listSessions, revokeSession } from '../sessions/session-store.js';
+import { createSession, listSessions, pauseSession, resumeSession, revokeSession } from '../sessions/session-store.js';
 import { isPermissionProfileName } from '../sessions/profiles.js';
 import { renderAgentHandshake } from '../protocol/render-agent-handshake.js';
 import { createConduitUrl, parseConduitUrl } from '../protocol/conduit-url.js';
 import {
   getApprovalRequest,
+  isApprovalDecider,
   listApprovalRequests,
   markApprovalExecutionFinished,
   markApprovalExecutionRunning,
@@ -18,6 +19,8 @@ import {
 } from '../approvals/approval-store.js';
 import { executeApprovedReview, executeRequestFromUnknown } from '../daemon/execute-request.js';
 import { createDiagnosticBundle } from '../diagnostics/diagnostic-bundle.js';
+import { getPauseState } from '../state/pause-state.js';
+import { getControlStatus, pauseAll, resumeAll, stopAll } from './control-operations.js';
 import { renderAppHtml, renderAppJs } from './control-panel-ui.js';
 import { CONTROL_PANEL_DEFAULT_PORT, isLoopbackHostname, refuseNonLocalRequest } from '../util/loopback-guard.js';
 
@@ -99,9 +102,11 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     }
 
     if (req.method === 'GET' && url.pathname === '/api/status') {
+      const pause = await getPauseState();
       sendJson(res, 200, {
         status: 'ok',
         mode: 'Compliance',
+        paused: pause.paused,
         stateRoot: getStateRoot(),
         exactEnvelopeParsing: true,
         embeddedBlockParsing: false,
@@ -112,7 +117,8 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           conduitUrlOpen: true,
           approvals: true,
           sessions: true,
-          runs: true
+          runs: true,
+          pause: true
         }
       });
       return;
@@ -207,6 +213,44 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       return;
     }
 
+    // Per-session pause/resume (S1). Like every trust-changing endpoint these
+    // live only on this Origin-guarded panel, never on the extension bridge.
+    const sessionPauseMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/(pause|resume)$/);
+    if (req.method === 'POST' && sessionPauseMatch?.[1] && sessionPauseMatch?.[2]) {
+      const sessionId = decodeURIComponent(sessionPauseMatch[1]);
+      try {
+        const session = sessionPauseMatch[2] === 'pause'
+          ? await pauseSession(sessionId)
+          : await resumeSession(sessionId);
+        sendJson(res, 200, { session });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        sendJson(res, message.startsWith('Unknown session') ? 404 : 409, { error: message });
+      }
+      return;
+    }
+
+    // Global pause / kill switch (S1).
+    if (req.method === 'GET' && url.pathname === '/api/control') {
+      sendJson(res, 200, { control: await getControlStatus() });
+      return;
+    }
+
+    const controlMatch = url.pathname.match(/^\/api\/control\/(pause|resume|stop-all)$/);
+    if (req.method === 'POST' && controlMatch?.[1]) {
+      const body = await readJsonBody(req) as { reason?: unknown; by?: unknown };
+      const by = isApprovalDecider(body.by) ? body.by : 'control-app';
+      const reason = typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : undefined;
+      if (controlMatch[1] === 'pause') {
+        sendJson(res, 200, { control: await pauseAll({ by, reason }) });
+      } else if (controlMatch[1] === 'resume') {
+        sendJson(res, 200, { control: await resumeAll({ by }) });
+      } else {
+        sendJson(res, 200, await stopAll({ by, reason }));
+      }
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/runs') {
       sendJson(res, 200, { runs: await listRuns() });
       return;
@@ -217,18 +261,49 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       return;
     }
 
+    const approvalShowMatch = url.pathname.match(/^\/api\/approvals\/([^/]+)$/);
+    if (req.method === 'GET' && approvalShowMatch?.[1]) {
+      const approval = await getApprovalRequest(decodeURIComponent(approvalShowMatch[1]));
+      if (!approval) {
+        sendJson(res, 404, { error: 'Unknown approval request.' });
+        return;
+      }
+      sendJson(res, 200, { approval });
+      return;
+    }
+
     const approvalMatch = url.pathname.match(/^\/api\/approvals\/([^/]+)\/(approve|deny)$/);
     if (req.method === 'POST' && approvalMatch?.[1] && approvalMatch?.[2]) {
-      const body = await readJsonBody(req) as { reason?: unknown };
+      const body = await readJsonBody(req) as { reason?: unknown; decidedBy?: unknown };
       const decision = approvalMatch[2] === 'approve' ? 'approved' : 'denied';
       const approvalId = decodeURIComponent(approvalMatch[1]);
+      // decidedBy is an audit label for the channel (panel, menu bar,
+      // notification, CLI); it grants nothing, so it is caller-declared from a
+      // fixed list and defaults to the panel.
+      const decidedBy = isApprovalDecider(body.decidedBy) ? body.decidedBy : 'control-app';
       const before = await getApprovalRequest(approvalId);
+      if (!before) {
+        sendJson(res, 404, { error: 'Unknown approval request.' });
+        return;
+      }
+      if (decision === 'approved' && before.status === 'pending' && (await getPauseState()).paused) {
+        // Nothing runs while paused, so an approval now could only fire later
+        // against a workspace the user has not looked at. Resume first.
+        sendJson(res, 409, { error: 'Conduit is paused. Resume before approving.', approval: before });
+        return;
+      }
       const approval = await resolveApprovalRequest(
         approvalId,
         decision,
         typeof body.reason === 'string' ? body.reason : undefined,
-        'control-app'
+        decidedBy
       );
+      if (approval.status !== decision) {
+        // Already decided another way, or expired (timeout = deny). A late
+        // approve must not look like it worked.
+        sendJson(res, 409, { error: `Approval is ${approval.status}, not pending.`, approval });
+        return;
+      }
       if (
         decision === 'approved'
         && before?.status === 'pending'

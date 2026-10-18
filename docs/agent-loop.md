@@ -59,7 +59,7 @@ or execute local actions by itself.
 Start Conduit with the menu-bar app, then choose:
 
 ```txt
-Conduit menu -> Copy Agent Handshake
+Conduit menu-bar popover -> Copy Agent Handshake
 ```
 
 Paste the handshake into a real ChatGPT tab. The handshake creates an

@@ -1,17 +1,22 @@
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { CONTROL_CLI_ROUTES } from '../../src/cli/control-client.js';
 
 describe('macOS menu-bar package scaffold', () => {
   it('ships a SwiftPM menu-bar app and build script', async () => {
     await expectExists('macos/ConduitMenuBar/Package.swift');
     await expectExists('macos/ConduitMenuBar/Sources/ConduitMenuBar/main.swift');
+    await expectExists('macos/ConduitMenuBar/Sources/ConduitMenuBarCore/MenuBarState.swift');
+    await expectExists('macos/ConduitMenuBar/Sources/ConduitMenuBarCore/ControlAPI.swift');
+    await expectExists('macos/ConduitMenuBar/Tests/ConduitMenuBarCoreTests/MenuBarStateTests.swift');
+    await expectExists('macos/ConduitMenuBar/Tests/ConduitMenuBarCoreTests/AllowOnceTests.swift');
     await expectExists('macos/ConduitMenuBar/Assets/ConduitIcon.svg');
     await expectExists('script/build_and_run.sh');
     await expectExists('script/package_dmg.sh');
     await expectExists('script/package_extension.sh');
 
-    const main = await readText('macos/ConduitMenuBar/Sources/ConduitMenuBar/main.swift');
+    const main = await swiftSources();
     expect(main).toContain('NSStatusBar.system.statusItem');
     expect(main).toContain('Start Clipboard Daemon');
     expect(main).toContain('Start Agent Listener');
@@ -53,22 +58,12 @@ describe('macOS menu-bar package scaffold', () => {
     expect(main).toContain('http://127.0.0.1:3333/health');
     expect(main).toContain('needs attention');
     expect(main).toContain('UNUserNotificationCenter');
-    expect(main).toContain('refreshApprovalNotifications');
+    expect(main).toContain('removeDeliveredNotifications');
     expect(main).toContain('/api/approvals');
     expect(main).toContain('Conduit approval required');
-    expect(main).toContain('Pending Approvals');
-    expect(main).toContain('approvePendingApproval');
-    expect(main).toContain('denyPendingApproval');
-    expect(main).toContain('presentConduitURLApproval');
     expect(main).toContain('Run \\(runId) is ready in Conduit.');
-    expect(main).toContain('accessoryView');
-    expect(main).toContain('approvalSummaryView');
-    expect(main).toContain('Open Desktop Details');
-    expect(main).toContain('Open Browser Details');
-    expect(main).toContain('ConduitApprovalDetailsPreference');
     expect(main).toContain('Approved from Conduit menu bar.');
     expect(main).toContain('Approved from Conduit notification.');
-    expect(main).toContain('openApprovals');
     expect(main).toContain('#approvals');
     expect(main).toContain('Control App Already Running');
     expect(main).toContain('Control App Needs Restart');
@@ -250,9 +245,67 @@ describe('macOS menu-bar package scaffold', () => {
   });
 });
 
+describe('menu-bar-first popover and notifications (spec S5/S6)', () => {
+  it('ships a core library with an XCTest target', async () => {
+    const manifest = await readText('macos/ConduitMenuBar/Package.swift');
+    expect(manifest).toContain('name: "ConduitMenuBarCore"');
+    expect(manifest).toContain('.testTarget(');
+    expect(manifest).toContain('dependencies: ["ConduitMenuBarCore"]');
+  });
+
+  it('replaces the NSMenu, service toggles and NSAlert approval prompt with a popover', async () => {
+    const swift = await swiftSources();
+    expect(swift).toContain('NSPopover');
+    expect(swift).toContain('NSHostingController');
+    expect(swift).toContain('Pause all');
+    expect(swift).toContain('Stop all');
+    expect(swift).toContain('Settings…');
+    // Removed by S5 (spec §3.4 "Delete from the menu").
+    expect(swift).not.toContain('statusItem.menu =');
+    expect(swift).not.toContain('NSMenuItem(');
+    expect(swift).not.toContain('Pending Approvals');
+    expect(swift).not.toContain('Open Desktop Details');
+    expect(swift).not.toContain('Open Browser Details');
+    expect(swift).not.toContain('ConduitApprovalDetailsPreference');
+    expect(swift).not.toContain('presentApprovalPrompt');
+    expect(swift).not.toContain('statusTitle()');
+    // Service toggles live only in the native Settings window now.
+    const popover = await readText('macos/ConduitMenuBar/Sources/ConduitMenuBar/PopoverView.swift');
+    expect(popover).not.toContain('Clipboard Daemon');
+    expect(popover).not.toContain('Agent Listener');
+  });
+
+  it('records which surface decided and pauses through the Control API', async () => {
+    const swift = await swiftSources();
+    expect(swift).toContain('case menubar');
+    expect(swift).toContain('case notification');
+    expect(swift).toContain('"decidedBy": channel.rawValue');
+    expect(swift).toContain('["by": channel.rawValue]');
+    expect(swift).toContain('stop(force: true)');
+    expect(swift).toContain('"stop-all", "--local"');
+    expect(swift).toContain('UNNotificationCategory');
+    expect(swift).toContain('RegisterEventHotKey');
+    expect(swift).toContain('Conduit is paused, so this was not approved');
+    expect(swift).toContain('paused before this request ran, so nothing ran');
+    expect(swift).toContain('expired and was denied');
+  });
+
+  it('calls only Control endpoints that have a CLI verb (spec §3.5 parity)', async () => {
+    const api = await readText('macos/ConduitMenuBar/Sources/ConduitMenuBarCore/ControlAPI.swift');
+    const swiftPaths = [...api.matchAll(/return "(\/api\/[^"]+)"/g)]
+      .map((match) => match[1]!.replace(/\\\([^)]*\)/g, ':id'));
+    expect(swiftPaths).toEqual(expect.arrayContaining(['/api/control/pause', '/api/control/stop-all', '/api/approvals/:id/approve', '/api/approvals/:id/deny']));
+    const cliPaths = new Set<string>(Object.values(CONTROL_CLI_ROUTES).map((route) => route.path));
+    // /api/status is the health probe; `conduit status` reads /api/control.
+    for (const swiftPath of swiftPaths.filter((candidate) => candidate !== '/api/status')) {
+      expect(cliPaths, swiftPath).toContain(swiftPath);
+    }
+  });
+});
+
 describe('menu-bar supervisor safety (spec invariant 5)', () => {
   it('never starts a supervised service with --yes', async () => {
-    const main = await readText('macos/ConduitMenuBar/Sources/ConduitMenuBar/main.swift');
+    const main = await swiftSources();
     const starts = main.match(/\.start\(arguments: \[[^\]]*\]\)/g) ?? [];
     expect(starts.length).toBeGreaterThanOrEqual(3);
     for (const start of starts) {
@@ -264,6 +317,22 @@ describe('menu-bar supervisor safety (spec invariant 5)', () => {
 
 async function expectExists(file: string): Promise<void> {
   await expect(access(path.resolve(file))).resolves.toBeUndefined();
+}
+
+/** Every Swift source of the menu-bar app and its core library, concatenated. */
+async function swiftSources(): Promise<string> {
+  const roots = [
+    'macos/ConduitMenuBar/Sources/ConduitMenuBar',
+    'macos/ConduitMenuBar/Sources/ConduitMenuBarCore'
+  ];
+  const texts: string[] = [];
+  for (const root of roots) {
+    const names = (await readdir(path.resolve(root))).filter((name) => name.endsWith('.swift')).sort();
+    for (const name of names) {
+      texts.push(await readText(path.join(root, name)));
+    }
+  }
+  return texts.join('\n');
 }
 
 async function readText(file: string): Promise<string> {

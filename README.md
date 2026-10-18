@@ -28,8 +28,13 @@ Every control-panel screenshot is **demo data** (see below), not a real machine.
 
 ## What is in the box
 
-- **macOS menu-bar app** (Swift) that supervises the local services, posts
-  approval notifications and stops everything on quit.
+- **macOS menu-bar app** (Swift) that supervises the local services and stays
+  quiet while trusted work runs. Its status icon shows idle, running, needs you,
+  paused or error; its popover lists asks (Allow once / Deny / Details), a
+  **Pause all** switch and **Stop all**. Notifications carry Deny and Review,
+  plus Allow once for single-file edits whose path is in the notification.
+  ⌃⌥C opens the popover on the oldest ask. Service controls, updates and logs
+  are in the native **Settings…** window. Quitting stops everything.
 - **Control panel** at `http://127.0.0.1:47831` for sessions, starter
   envelopes, clipboard checks, agent handshakes, approvals, runs and redacted
   bug reports.
@@ -138,7 +143,12 @@ already running finishes, the rest of its batch does not start. The flag
 survives restarts, and an unreadable flag counts as paused. `--session <id>`
 pauses one session. `conduit stop-all` pauses and revokes every live session.
 Pause and resume exist only on the Origin-guarded control panel, never on the
-extension bridge.
+extension bridge. In the menu bar, **Pause all** (⌘P in the popover) calls the
+same endpoints, and **Stop all** calls `stop-all` and then also stops the
+services the menu bar launched, including any tool run under them; if Control
+does not answer it writes the pause with `conduit stop-all --local`. Menu-bar
+and notification decisions are recorded as `decidedBy: menubar` and
+`notification`.
 
 **Local-only API.** Every Conduit service binds `127.0.0.1`. The control panel refuses
 to bind anything else, answers only loopback `Host` headers (DNS rebinding) and

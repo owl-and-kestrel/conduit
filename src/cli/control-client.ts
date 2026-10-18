@@ -19,7 +19,12 @@ export const CONTROL_CLI_ROUTES = {
   'approvals show': { method: 'GET', path: '/api/approvals/:id' },
   'approvals approve': { method: 'POST', path: '/api/approvals/:id/approve' },
   'approvals deny': { method: 'POST', path: '/api/approvals/:id/deny' },
-  'runs list': { method: 'GET', path: '/api/runs' }
+  'runs list': { method: 'GET', path: '/api/runs' },
+  'runs result': { method: 'GET', path: '/api/runs/:id/result' },
+  'app status': { method: 'GET', path: '/api/status' },
+  diagnostics: { method: 'GET', path: '/api/diagnostics' },
+  'session handshake': { method: 'POST', path: '/api/agent-handshake' },
+  'url open': { method: 'POST', path: '/api/url/open' }
 } as const;
 
 export type ControlCliVerb = keyof typeof CONTROL_CLI_ROUTES;
@@ -100,6 +105,29 @@ export class ControlClient {
 
   listRuns(): Promise<any> {
     return this.call('runs list');
+  }
+
+  runResult(runId: string): Promise<any> {
+    return this.call('runs result', { id: runId });
+  }
+
+  appStatus(): Promise<any> {
+    return this.call('app status');
+  }
+
+  diagnostics(): Promise<any> {
+    return this.call('diagnostics');
+  }
+
+  agentHandshake(input: { label?: string; root?: string; profile?: string; transport?: string; copy?: boolean } = {}): Promise<any> {
+    return this.call('session handshake', {}, {
+      ...input,
+      copy: input.copy ?? false
+    });
+  }
+
+  openConduitUrl(url: string): Promise<any> {
+    return this.call('url open', {}, { url });
   }
 
   async call(verb: ControlCliVerb, params: { id?: string } = {}, body?: Record<string, unknown>): Promise<any> {

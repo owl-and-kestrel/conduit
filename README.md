@@ -71,7 +71,8 @@ Owl + Kestrel registry configured in `.npmrc`. It needs no login.
 | `npm run doctor` | Checks the local runtime environment. |
 | `npm run conduit -- session create --label Demo --root fixtures/fake-project` | Pairs a session (see `session list`, `session revoke`). |
 | `npm run conduit -- pause` / `resume` / `status` | Pauses or resumes all execution (`--session <id>` for one session); `stop-all` also revokes every session. Add `--local` when Control is not running. |
-| `npm run conduit -- approvals list` | Lists pending approvals; `approvals show|approve|deny <id>` decide them through the same API as the panel. `runs list` lists runs. |
+| `npm run conduit -- approvals list` | Lists pending approvals; `approvals show|approve|deny <id>` decide them through the same API as the panel. `runs list` lists runs and `runs result <id>` prints one result. |
+| `npm run conduit -- app status` | Shows the running Control service; `session handshake` prints an agent handshake, `url open <link>` submits a `conduit://` link and `diagnostics` prints the redacted bug-report bundle, all through the same API as the panel and menu bar. |
 | `npm run listen` | Starts the extension bridge listener on `127.0.0.1:3333`. |
 | `npm run site:dev` | Serves `website/` on `http://127.0.0.1:47832`. |
 | `npm run build` | Type-checks and compiles to `dist/` (`node dist/src/cli/index.js --help`). |

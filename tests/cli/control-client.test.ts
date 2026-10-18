@@ -61,15 +61,22 @@ describe('CLI / API parity for pause and approvals (S1/S2)', () => {
     await client.decideApproval('approval_1', 'approve', 'ok');
     await client.decideApproval('approval_1', 'deny');
     await client.listRuns();
+    await client.runResult('run_1');
+    await client.appStatus();
+    await client.diagnostics();
+    await client.agentHandshake({ label: 'L' });
+    await client.openConduitUrl('conduit://run?payload=x');
 
     const expected = Object.values(CONTROL_CLI_ROUTES).map((route) => ({
       method: route.method,
-      path: route.path.replace(':id', route.path.includes('/sessions/') ? 'sess_1' : 'approval_1')
+      path: route.path.replace(':id', route.path.includes('/sessions/') ? 'sess_1' : route.path.includes('/runs/') ? 'run_1' : 'approval_1')
     }));
     expect(calls.map(({ method, path: callPath }) => ({ method, path: callPath }))).toEqual(expected);
     expect(calls[1].body).toEqual({ by: 'cli', reason: 'r' });
     expect(calls[8].body).toEqual({ decidedBy: 'cli', reason: 'ok' });
     expect(calls[9].body).toEqual({ decidedBy: 'cli' });
+    expect(calls[14].body).toEqual({ label: 'L', copy: false });
+    expect(calls[15].body).toEqual({ url: 'conduit://run?payload=x' });
   });
 
   it('gets the same answers as the API and records CLI decisions as cli', async () => {

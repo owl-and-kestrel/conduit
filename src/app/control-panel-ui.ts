@@ -105,6 +105,8 @@ code, pre, .mono { font-family: var(--mono); font-size: 12.5px; }
 .demo-banner { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 9px 20px; background: var(--warn-soft); border-bottom: 1px solid var(--warn-line); color: var(--ink-2); font-size: 13px; }
 .demo-banner strong { color: var(--warn); }
 .demo-banner a { margin-left: auto; font-weight: 600; color: var(--warn); }
+.paused-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 18px; padding: 10px 14px; border: 1px solid var(--warn-line); background: var(--warn-soft); border-radius: 10px; color: var(--ink-2); font-size: 13.5px; }
+.paused-banner strong { color: var(--warn); }
 .demo-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; background: var(--warn); color: #fff; font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 
 .shell { min-height: 100vh; display: grid; grid-template-columns: 256px minmax(0, 1fr); }
@@ -331,12 +333,15 @@ const BODY = `<div class="demo-banner" id="demoBanner" hidden>
         <p class="lede" id="subtitle">Compliance mode, exact clipboard envelopes only.</p>
       </div>
       <div class="toolbar">
+        <button class="btn" id="pauseToggle" type="button" aria-pressed="false" title="Pause or resume everything">Pause all</button>
         <button class="btn" id="refresh" type="button">__ICON_refresh__Refresh</button>
         <button class="btn" id="reportBug" type="button">Report Bug</button>
         <button class="btn" id="copyHandshake" type="button">Copy Agent Handshake</button>
         <button class="btn primary" id="checkClipboard" type="button">Check Clipboard Once</button>
       </div>
     </header>
+
+    <div class="paused-banner" id="pausedBanner" role="status" hidden><strong id="pausedText">Paused</strong><span>Nothing runs until you resume.</span></div>
 
     <section id="overviewView">
       <div class="stats">
@@ -504,7 +509,7 @@ const PROFILE_HINTS = {
 };
 const config = readConfig();
 const DEMO = new URLSearchParams(location.search).has('demo');
-const state = { status: null, bridge: null, sessions: [], approvals: [], runs: [], view: 'overview' };
+const state = { status: null, control: null, bridge: null, sessions: [], approvals: [], runs: [], view: 'overview' };
 const $ = (id) => document.getElementById(id);
 let demoStore = null;
 let toastTimer = null;
@@ -540,8 +545,9 @@ function setStatus(text, kind) {
 let lastSignature = '';
 
 async function refresh(onlyIfChanged) {
-  const [status, bridge, sessions, approvals, runs] = await Promise.all([
+  const [status, control, bridge, sessions, approvals, runs] = await Promise.all([
     api('/api/status'),
+    api('/api/control'),
     fetchBridgeHealth(),
     api('/api/sessions'),
     api('/api/approvals'),
@@ -549,10 +555,11 @@ async function refresh(onlyIfChanged) {
   ]);
   // Background polls skip re-rendering when nothing changed, so open details
   // and scroll positions are not disturbed while the user is reading.
-  const signature = JSON.stringify([status, bridge, sessions, approvals, runs]);
+  const signature = JSON.stringify([status, control, bridge, sessions, approvals, runs]);
   if (onlyIfChanged && signature === lastSignature) return;
   lastSignature = signature;
   state.status = status;
+  state.control = control.control;
   state.bridge = bridge;
   state.sessions = sessions.sessions;
   state.approvals = approvals.approvals;
@@ -587,6 +594,26 @@ function render() {
   renderSessions();
   renderApprovals();
   renderRuns();
+  renderPause();
+}
+
+function renderPause() {
+  const control = state.control || {};
+  const pause = control.pause || {};
+  const paused = Boolean(control.paused);
+  $('pauseToggle').textContent = paused ? 'Resume' : 'Pause all';
+  $('pauseToggle').setAttribute('aria-pressed', paused ? 'true' : 'false');
+  $('pauseToggle').classList.toggle('primary', paused);
+  $('pausedBanner').hidden = !paused;
+  $('pausedText').textContent = pausedLine(pause);
+}
+
+function pausedLine(pause) {
+  if (pause.unreadable) return 'Paused · pause state unreadable (fail closed)';
+  if (!pause.pausedAt) return 'Paused';
+  const at = new Date(pause.pausedAt);
+  if (Number.isNaN(at.getTime())) return 'Paused';
+  return 'Paused since ' + at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function renderServices() {
@@ -921,6 +948,31 @@ $('refresh').addEventListener('click', () => guarded(async () => {
   await refresh();
   setStatus('Refreshed.');
 }));
+// Pause all / Resume (spec S7). The same calls the menu bar and
+// 'conduit pause' / 'conduit resume' make; the server's Origin, Host and
+// loopback guards apply unchanged. 'control-app' is this panel's audit label.
+$('pauseToggle').addEventListener('click', () => guarded(async () => {
+  const button = $('pauseToggle');
+  button.disabled = true;
+  try {
+    const wasPaused = Boolean(state.control && state.control.paused);
+    if (wasPaused) {
+      await api('/api/control/resume', {
+        method: 'POST',
+        body: JSON.stringify({ by: 'control-app' })
+      });
+    } else {
+      await api('/api/control/pause', {
+        method: 'POST',
+        body: JSON.stringify({ by: 'control-app', reason: 'Paused from Conduit Control.' })
+      });
+    }
+    setStatus(wasPaused ? 'Resumed. Trusted requests run again.' : 'Paused. Nothing runs until you resume.');
+  } finally {
+    button.disabled = false;
+    await refresh();
+  }
+}));
 $('reportBug').addEventListener('click', () => guarded(async () => {
   setView('diagnostics');
   await loadDiagnostics();
@@ -1069,6 +1121,7 @@ function demoState() {
   const root = '~/projects/field-notes';
   demoStore = {
     counter: 0,
+    control: { paused: false, pause: { paused: false }, liveSessions: 2, pausedSessions: [], pendingApprovals: 2 },
     status: {
       status: 'ok',
       mode: 'Compliance',
@@ -1204,6 +1257,13 @@ async function demoApi(path, options = {}) {
   const body = options.body ? JSON.parse(options.body) : {};
   await new Promise((resolve) => setTimeout(resolve, 120));
   if (path === '/api/status') return store.status;
+  if (path === '/api/control' && method === 'GET') return { control: store.control };
+  if (path === '/api/control/pause' || path === '/api/control/resume') {
+    const paused = path === '/api/control/pause';
+    store.control.paused = paused;
+    store.control.pause = paused ? { paused: true, pausedAt: new Date().toISOString(), pausedBy: 'control-app (demo)', reason: body.reason } : { paused: false };
+    return { control: store.control };
+  }
   if (path === '/api/sessions' && method === 'GET') return { sessions: store.sessions };
   if (path === '/api/approvals') return { approvals: store.approvals };
   if (path === '/api/runs') return { runs: store.runs };

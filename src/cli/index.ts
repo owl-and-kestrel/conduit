@@ -141,6 +141,34 @@ sessionCommand.command('revoke')
     console.log(`Revoked session ${session.sessionId}`);
   });
 
+sessionCommand.command('handshake')
+  .description('Create a session through Conduit Control and print the agent handshake to paste into a chat (same as Copy Agent Handshake).')
+  .option('--label <text>', 'session label', 'Agent handshake')
+  .option('--root <path>', 'allowed project root')
+  .option('--profile <name>', 'read-only|edit-with-confirmation|shell-manual', 'read-only')
+  .option('--transport <name>', 'clipboard|extension|browser-yolo|api', 'extension')
+  .option('--copy', 'also copy it to the clipboard through Conduit Control', false)
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--json', 'print the raw API response', false)
+  .action(async (options: {
+    label: string;
+    root?: string;
+    profile: string;
+    transport: string;
+    copy: boolean;
+    url?: string;
+    json: boolean;
+  }) => {
+    const result = await new ControlClient({ url: options.url }).agentHandshake({
+      label: options.label,
+      root: options.root ?? process.cwd(),
+      profile: options.profile,
+      transport: options.transport,
+      copy: options.copy
+    });
+    console.log(options.json ? JSON.stringify(result, null, 2) : result.handshake);
+  });
+
 // ---- Pause / kill switch (S1) and approvals parity (S2) ---------------------
 // Each verb is one call to the Conduit Control API (see control-client.ts).
 // --local runs the same control operations in-process, for when Control is
@@ -217,6 +245,30 @@ program.command('stop-all')
     console.log(`Revoked sessions: ${result.revokedSessions.length > 0 ? result.revokedSessions.join(', ') : 'none'}`);
   });
 
+program.command('diagnostics')
+  .description('Print the redacted diagnostic bundle (the same preview as Report Bug).')
+  .option('--url <url>', 'Conduit Control URL')
+  .action(async (options: { url?: string }) => {
+    console.log(JSON.stringify((await new ControlClient({ url: options.url }).diagnostics()).bundle, null, 2));
+  });
+
+const urlCommand = program.command('url').description('Submit conduit:// links to Conduit Control.');
+
+urlCommand.command('open')
+  .description('Submit a conduit:// link to Conduit Control. It is handled exactly like the menu bar does: untrusted requests become a review, nothing runs unapproved.')
+  .argument('<conduitUrl>', 'conduit:// link')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--json', 'print the raw API response', false)
+  .action(async (conduitUrl: string, options: { url?: string; json: boolean }) => {
+    const result = await new ControlClient({ url: options.url }).openConduitUrl(conduitUrl);
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    console.log(`Execution: ${result.execution?.status ?? 'unknown'}${result.execution?.runId ? ` (run ${result.execution.runId})` : ''}`);
+    if (result.execution?.reason) console.log(`Reason: ${result.execution.reason}`);
+  });
+
 const approvalsCommand = program.command('approvals')
   .description('List and decide pending Conduit approvals (same API as the panel and menu bar).');
 
@@ -286,6 +338,16 @@ runsCommand.command('list')
     }
     const runs = result.runs as any[];
     console.log(runs.length === 0 ? 'No runs.' : runs.map(formatRunLine).join('\n'));
+  });
+
+runsCommand.command('result')
+  .description('Print the stored result text of one run.')
+  .argument('<runId>', 'run id')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--json', 'print the raw API response', false)
+  .action(async (runId: string, options: { url?: string; json: boolean }) => {
+    const result = await new ControlClient({ url: options.url }).runResult(runId);
+    console.log(options.json ? JSON.stringify(result, null, 2) : (result.result || '(no result text)'));
   });
 
 program.command('login:system')
@@ -468,6 +530,23 @@ daemonCommand.command('start')
 
 const appCommand = program.command('app')
   .description('Run the local Conduit control app.');
+
+appCommand.command('status')
+  .description('Show the running Conduit Control service status (GET /api/status).')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--json', 'print the raw API response', false)
+  .action(async (options: { url?: string; json: boolean }) => {
+    const status = await new ControlClient({ url: options.url }).appStatus();
+    if (options.json) {
+      console.log(JSON.stringify(status, null, 2));
+      return;
+    }
+    console.log(`Conduit Control: ${status.status}`);
+    console.log(`Mode: ${status.mode}`);
+    console.log(`Paused: ${status.paused ? 'yes' : 'no'}`);
+    console.log(`State: ${status.stateRoot}`);
+    console.log(`Checkout: ${status.identity?.checkoutRoot ?? 'unknown'}`);
+  });
 
 appCommand.command('start')
   .description('Start the local control app.')

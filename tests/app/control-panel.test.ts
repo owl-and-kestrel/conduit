@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { startControlPanel, type ControlPanelHandle } from '../../src/app/control-panel.js';
@@ -386,6 +387,7 @@ describe('control panel app', () => {
     expect(script).toContain("new URLSearchParams(location.search).has('demo')");
     expect(script).toContain('if (DEMO) return demoApi(path, options);');
     expect(script).toContain('demo mode does not read your clipboard');
+    expect(script).toContain("if (path === '/api/control' && method === 'GET') return { control: store.control };");
   });
 
   it('refuses cross-origin and DNS-rebinding requests to the local API', async () => {
@@ -428,6 +430,55 @@ describe('control panel app', () => {
       body: JSON.stringify({ reason: 'same-origin UI' })
     });
     expect(sameOrigin.status).toBe(200);
+  });
+
+  it('pauses and resumes from the panel through the guarded control API (S7)', async () => {
+    const html = await fetchText(`${app.url}/`);
+    expect(html).toContain('id="pauseToggle"');
+    expect(html).toContain('id="pausedBanner"');
+    const script = await fetchText(`${app.url}/app.js`);
+    // The served client must be valid JavaScript.
+    expect(() => new vm.Script(script)).not.toThrow();
+    expect(script).toContain("api('/api/control')");
+    expect(script).toContain("api('/api/control/pause', {");
+    expect(script).toContain("api('/api/control/resume', {");
+    expect(script).toContain("by: 'control-app'");
+    expect(script).toContain('Nothing runs until you resume.');
+
+    // The panel's own same-origin request passes the guards.
+    const paused = await fetch(`${app.url}/api/control/pause`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: app.url, 'Sec-Fetch-Site': 'same-origin' },
+      body: JSON.stringify({ by: 'control-app', reason: 'Paused from Conduit Control.' })
+    });
+    expect(paused.status).toBe(200);
+    expect(((await paused.json()) as any).control).toMatchObject({ paused: true, pause: { pausedBy: 'control-app' } });
+    expect((await fetchJson(`${app.url}/api/control`)).control.paused).toBe(true);
+
+    // A foreign page cannot resume it.
+    const crossOrigin = await fetch(`${app.url}/api/control/resume`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' },
+      body: JSON.stringify({ by: 'control-app' })
+    });
+    expect(crossOrigin.status).toBe(403);
+    const crossSite = await fetch(`${app.url}/api/control/resume`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site' },
+      body: JSON.stringify({ by: 'control-app' })
+    });
+    expect(crossSite.status).toBe(403);
+    const panelPort = new URL(app.url).port;
+    expect((await rawRequest(app.url, '/api/control', `conduit.attacker.example:${panelPort}`)).status).toBe(403);
+    expect((await fetchJson(`${app.url}/api/control`)).control.paused).toBe(true);
+
+    const resumed = await fetch(`${app.url}/api/control/resume`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: app.url, 'Sec-Fetch-Site': 'same-origin' },
+      body: JSON.stringify({ by: 'control-app' })
+    });
+    expect(resumed.status).toBe(200);
+    expect(((await resumed.json()) as any).control.paused).toBe(false);
   });
 
   it('refuses to bind the control panel to a non-loopback host', async () => {

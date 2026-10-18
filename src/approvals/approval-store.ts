@@ -8,6 +8,9 @@ import { createRunId } from '../util/ids.js';
 const APPROVAL_POLL_MS = 500;
 export const DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;
 
+/** `decidedBy` of a record that expired because no one decided it in time. */
+export const APPROVAL_TIMEOUT_DECIDER = 'timeout';
+
 export interface ConfirmationRequest {
   action: ToolAction;
   policyReason: string;
@@ -194,7 +197,7 @@ async function expireApprovalRequest(record: ApprovalRecord): Promise<ApprovalRe
     status: 'expired',
     updatedAt: now,
     decidedAt: now,
-    decidedBy: 'timeout',
+    decidedBy: APPROVAL_TIMEOUT_DECIDER,
     decisionReason: 'Approval request timed out.'
   };
   await writeApprovalRecord(expired);

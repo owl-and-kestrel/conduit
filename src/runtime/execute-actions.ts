@@ -1,5 +1,6 @@
 import readline from 'node:readline';
 import {
+  APPROVAL_TIMEOUT_DECIDER,
   DEFAULT_APPROVAL_TIMEOUT_MS,
   createApprovalRequest,
   resolveApprovalRequest,
@@ -15,6 +16,10 @@ import { appendJsonl } from '../state/logs.js';
 import { checkExecutionGate } from '../state/pause-state.js';
 import { getTool } from '../tools/registry.js';
 import { executeToolAction } from '../tools/types.js';
+
+/** Told to the agent when an ask expired: nobody refused it, and nothing ran. */
+export const APPROVAL_EXPIRED_ERROR =
+  'The approval request expired before anyone approved it, so nothing ran. Resend the request to ask again.';
 
 export interface ExecuteActionsInput {
   actions: ToolAction[];
@@ -184,11 +189,15 @@ async function handlePolicyDecision(
       return null;
     }
 
+    // An expired ask was never refused by a person. Say so, so the agent knows
+    // nothing ran and can resend. The status stays 'denied' (fail closed).
     return {
       id: action.id,
       tool: action.tool,
       status: 'denied',
-      error: 'User denied this action.'
+      error: outcome.decidedBy === APPROVAL_TIMEOUT_DECIDER
+        ? APPROVAL_EXPIRED_ERROR
+        : 'User denied this action.'
     };
   }
 

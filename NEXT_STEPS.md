@@ -1,5 +1,35 @@
 # Conduit Handoff Notes
 
+## Current state (2026-10-18)
+
+- Public repo: https://github.com/owl-and-kestrel/conduit (Apache-2.0).
+- Released: v0.0.1 closed alpha on GitHub Releases. The macOS app is unsigned
+  and not notarized; its update manifest is O+K-signed.
+- Portfolio polish pass: redesigned control panel with consent cards, a
+  labelled demo data mode (`?demo=1`), restyled website and extension popup,
+  loopback-only / same-origin guard on the control API, README quickstart
+  split into Linux-and-macOS vs macOS-only, and `npm run screenshots`.
+
+Next, in rough priority order:
+
+1. Apple Developer ID signing and notarization (Next Gate 3 below).
+2. Linux and Windows clipboard I/O. `src/daemon/clipboard-io.ts` only has
+   `MacClipboardIO` (`pbpaste`/`pbcopy`), so the clipboard daemon and the
+   panel's clipboard buttons do not work on the Linux/Windows previews yet.
+3. Give the extension bridge (`127.0.0.1:3333`) the same Host/Origin guard as
+   the control panel, scoped to the extension's origin and the panel.
+4. Release hygiene: the published v0.0.1 `Conduit.dmg.sha256` contains the
+   build machine's absolute path (fixed for future builds in
+   `script/package_dmg.sh`), and the owlandkestrel.com release redirects still
+   go through the old jon-vs-moloch repository URL.
+5. `script/build_and_run.sh` and the Swift supervisor match
+   `dist/cli/index.js` in process command lines, but the build emits
+   `dist/src/cli/index.js`. Harmless today (the app runs the CLI through
+   `npm run conduit`), but the matchers should follow the real path.
+
+The gate log below is the build history. Read it for context; the list above
+is the current queue.
+
 Current state:
 
 - Conduit was scaffolded from the sibling `veyr` project.
@@ -237,7 +267,7 @@ Known-good verification from the latest protocol model eval pass:
 
 ```txt
 npm run build  # passed
-npm test       # passed, 30 files / 140 tests
+npm test       # passed, 30 files / 140 tests (at the time of that eval pass)
 ```
 
 ## Completed Gate: GitHub Repository

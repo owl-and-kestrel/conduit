@@ -32,6 +32,7 @@
     "windows:package": "node ./script/package_windows.mjs",
     "eval:protocol": "tsx scripts/protocol-model-eval.ts",
     "site:dev": "tsx scripts/serve-site.ts",
+    "screenshots": "tsx scripts/capture-screenshots.ts",
     "login": "tsx src/cli/index.ts login",
     "login:system": "tsx src/cli/index.ts login:system",
     "login:chromium": "tsx src/cli/index.ts login:chromium",

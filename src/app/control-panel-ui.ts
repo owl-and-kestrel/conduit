@@ -593,7 +593,7 @@ function renderServices() {
   const bridgeOnline = bridge.status && bridge.status !== 'offline';
   const tab = bridge.tabAvailability;
   const rows = [
-    ['ok', 'Control panel', location.host + (DEMO ? ' (demo data)' : '')],
+    ['ok', 'Control panel', (DEMO ? '127.0.0.1:47831 (demo data)' : location.host)],
     [bridgeOnline ? (tab && tab.status !== 'ready' ? 'warn' : 'ok') : 'off', 'Extension bridge', bridgeOnline ? '127.0.0.1:3333' + (tab ? ' / ChatGPT tab ' + tab.status : '') : 'offline. Optional; clipboard flows work without it.'],
     ['ok', 'Clipboard watcher', state.status?.exactEnvelopeParsing === false ? 'embedded-block parsing enabled' : 'exact envelopes only, embedded blocks ignored'],
     ['ok', 'State', state.status?.stateRoot || '~/.conduit']

@@ -1,5 +1,11 @@
 # Conduit — Implementation Guide
 
+> **History.** This is the original v0 build guide, kept for design context.
+> Most phases below are done, and some details changed during the build. For
+> current behavior read the [README](README.md) and [spec.md](spec.md); for
+> what is next read [NEXT_STEPS.md](NEXT_STEPS.md). "Veyr" is the earlier
+> prototype that Conduit was generalized from.
+
 ## 0. Goal
 
 Build Conduit v0: an installable local app/daemon that watches for Conduit requests, validates them, executes permitted local actions, and returns results through clipboard/app UI.

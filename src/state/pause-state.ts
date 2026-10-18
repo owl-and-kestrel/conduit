@@ -1,6 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getSession } from '../sessions/session-store.js';
+import { writeFileAtomic } from './atomic-write.js';
 import { getStateRoot } from './paths.js';
 
 /**
@@ -84,6 +85,7 @@ export async function clearGlobalPause(input: { by: string }): Promise<PauseStat
  * the work runs under when that session is no longer `active` (paused, revoked
  * or expired mid-batch). Ephemeral policy sessions that were never stored (the
  * agent-loop harness, approved one-off reviews) are gated by the global flag.
+ * An unreadable session store is a session-scope deny (fail closed), never a throw.
  */
 export async function checkExecutionGate(sessionId?: string): Promise<ExecutionGate> {
   const pause = await getPauseState();
@@ -97,7 +99,18 @@ export async function checkExecutionGate(sessionId?: string): Promise<ExecutionG
     };
   }
   if (sessionId) {
-    const session = await getSession(sessionId);
+    let session: Awaited<ReturnType<typeof getSession>>;
+    try {
+      session = await getSession(sessionId);
+    } catch (error) {
+      // Fail closed: if the session store cannot be read we cannot tell
+      // whether this session was paused or revoked, so nothing runs.
+      return {
+        ok: false,
+        scope: 'session',
+        reason: `Conduit session state is unreadable, so session ${sessionId} is treated as paused (fail closed): ${error instanceof Error ? error.message : String(error)}`
+      };
+    }
     if (session && session.state !== 'active') {
       return {
         ok: false,
@@ -112,11 +125,7 @@ export async function checkExecutionGate(sessionId?: string): Promise<ExecutionG
 }
 
 async function writePauseState(state: PauseState): Promise<void> {
-  const filePath = getPauseStatePath();
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-  await rename(tempPath, filePath);
+  await writeFileAtomic(getPauseStatePath(), `${JSON.stringify(state, null, 2)}\n`);
 }
 
 function failClosed(error: unknown): PauseState {

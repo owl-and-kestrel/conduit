@@ -313,6 +313,16 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         const running = await markApprovalExecutionRunning(approval.approvalId);
         try {
           const execution = await executeApprovedReview(running, { yes: true });
+          if (execution.repair?.code === 'paused') {
+            // Pause landed after the check above but before the review ran, so
+            // nothing ran. Fail closed: the record stays approved with its
+            // execution failed and is never re-run later against a workspace the
+            // user has not looked at. Say so plainly; the user resends after resume.
+            const message = 'Conduit was paused before this approved review ran, so nothing ran. Resume Conduit, then resend the request.';
+            const updated = await markApprovalExecutionFinished(approval.approvalId, { status: 'failed', error: message });
+            sendJson(res, 409, { error: message, approval: updated, execution });
+            return;
+          }
           let copiedToClipboard = false;
           let clipboardError: string | undefined;
           if (execution.rendered) {

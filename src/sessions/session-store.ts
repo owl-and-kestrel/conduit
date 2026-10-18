@@ -1,6 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import { writeFileAtomic } from '../state/atomic-write.js';
 import { getStateRoot } from '../state/paths.js';
 import { createNonce, createSessionId } from './nonce.js';
 import { isPermissionProfileName, type PermissionProfileName } from './profiles.js';
@@ -200,11 +201,7 @@ async function readSessionStore(): Promise<{ sessions: ConduitSession[] }> {
 }
 
 async function writeSessionStore(store: { sessions: ConduitSession[] }): Promise<void> {
-  const filePath = getSessionStorePath();
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(store, null, 2)}\n`, 'utf8');
-  await rename(tempPath, filePath);
+  await writeFileAtomic(getSessionStorePath(), `${JSON.stringify(store, null, 2)}\n`);
 }
 
 function getSessionStorePath(): string {

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +10,11 @@ import { conduitExtensionPrepareAlphaInstallTool } from '../../src/tools/conduit
 
 const execFileAsync = promisify(execFile);
 
-describe('conduit.extension.prepareAlphaInstall', () => {
+// The fixture is built with /usr/bin/zip and the tool extracts with
+// /usr/bin/unzip; hosts without them (e.g. a minimal Linux CI box) skip.
+const hasZipTools = existsSync('/usr/bin/zip') && existsSync('/usr/bin/unzip');
+
+describe.skipIf(!hasZipTools)('conduit.extension.prepareAlphaInstall', () => {
   let tempRoot: string;
   let projectRoot: string;
 

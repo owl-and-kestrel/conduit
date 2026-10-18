@@ -64,6 +64,21 @@ describe('pause / kill switch (S1)', () => {
     expect(gate.ok ? '' : gate.reason).toContain('fail closed');
   });
 
+  it('survives concurrent pause/resume writers without a shared temp file', async () => {
+    await expect(Promise.all(Array.from({ length: 20 }, (_, i) => (i % 2 === 0 ? setGlobalPause({ by: 'cli' }) : clearGlobalPause({ by: 'cli' }))))).resolves.toHaveLength(20);
+    const state = await getPauseState();
+    expect(state.unreadable).toBeUndefined();
+    expect((await readdir(stateRoot)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('denies (fail closed) instead of throwing when the session store is unreadable', async () => {
+    await mkdir(stateRoot, { recursive: true });
+    await writeFile(path.join(stateRoot, 'sessions.json'), '{not json', 'utf8');
+    const gate = await checkExecutionGate('sess_unreadable');
+    expect(gate).toMatchObject({ ok: false, scope: 'session' });
+    expect(gate.ok ? '' : gate.reason).toContain('fail closed');
+  });
+
   it('blocks a trusted request while paused: no tool runs, no ask, nonce kept, paused repair returned', async () => {
     const session = await createSession({
       label: 'Trusted',

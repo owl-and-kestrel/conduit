@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -7,6 +7,8 @@ import {
   createSession,
   getSession,
   listSessions,
+  pauseSession,
+  resumeSession,
   revokeSession,
   validateSessionNonce
 } from '../../src/sessions/session-store.js';
@@ -114,5 +116,19 @@ describe('session store', () => {
       reason: 'Session is expired.',
       sessionState: 'expired'
     });
+  });
+
+  it('survives concurrent store writers without a shared temp file', async () => {
+    const session = await createSession({
+      label: 'Concurrent',
+      permissionProfile: 'read-only',
+      allowedRoots: [tempRoot]
+    });
+
+    await expect(Promise.all(Array.from({ length: 20 }, (_, i) => (i % 2 === 0 ? pauseSession(session.sessionId) : resumeSession(session.sessionId))))).resolves.toHaveLength(20);
+
+    const stored = JSON.parse(await readFile(path.join(stateRoot, 'sessions.json'), 'utf8'));
+    expect(stored.sessions.map((s: { sessionId: string }) => s.sessionId)).toEqual([session.sessionId]);
+    expect((await readdir(stateRoot)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   });
 });

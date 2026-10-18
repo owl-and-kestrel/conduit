@@ -171,7 +171,7 @@ describe('macOS menu-bar package scaffold', () => {
         sha256: '0'.repeat(64)
       },
       source: {
-        repository: 'https://github.com/jon-vs-moloch/conduit.git',
+        repository: 'https://github.com/owl-and-kestrel/conduit.git',
         commit: '0'.repeat(40),
         dirty: false,
         buildConfiguration: 'release'
@@ -232,7 +232,7 @@ describe('macOS menu-bar package scaffold', () => {
     expect(popup).toContain('unavailable');
     const popupHtml = await readText('extension/popup.html');
     expect(popupHtml).toContain('Desktop app not connected');
-    expect(popupHtml).toContain('https://github.com/jon-vs-moloch/conduit');
+    expect(popupHtml).toContain('https://github.com/owl-and-kestrel/conduit');
     expect(popupHtml).toContain('Report Bug');
     expect(popupHtml).toContain('http://127.0.0.1:47831#diagnostics');
   });

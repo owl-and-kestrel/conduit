@@ -245,7 +245,7 @@ npm test       # passed, 30 files / 140 tests
 The repository is initialized and pushed to:
 
 ```txt
-https://github.com/jon-vs-moloch/conduit
+https://github.com/owl-and-kestrel/conduit
 ```
 
 ## Completed Gate: Session And Nonce Layer

@@ -2,6 +2,16 @@
   "name": "conduit",
   "version": "0.0.1",
   "private": true,
+  "description": "A local control plane for consent-shaped agent execution.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/owl-and-kestrel/conduit.git"
+  },
+  "homepage": "https://github.com/owl-and-kestrel/conduit#readme",
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "bin": {
     "conduit": "./dist/cli/index.js"

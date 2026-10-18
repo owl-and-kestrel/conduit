@@ -56,7 +56,7 @@ Release metadata can be pointed at hosted artifacts without changing the local
 build:
 
 ```txt
-CONDUIT_RELEASE_BASE_URL="https://github.com/jon-vs-moloch/conduit/releases/download/v0.0.1" npm run macos:package
+CONDUIT_RELEASE_BASE_URL="https://github.com/owl-and-kestrel/conduit/releases/download/v0.0.1" npm run macos:package
 ```
 
 For launch builds, O&K owns the signed release channel. Provide

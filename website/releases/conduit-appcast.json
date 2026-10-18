@@ -10,7 +10,7 @@
   "artifacts": [
     {
       "platform": "macos-universal",
-      "url": "https://github.com/jon-vs-moloch/conduit/releases/download/v0.0.1/Conduit.dmg",
+      "url": "https://github.com/owl-and-kestrel/conduit/releases/download/v0.0.1/Conduit.dmg",
       "sha256": "local-preview-sha256-published-with-release",
       "sizeBytes": 0,
       "signature": null

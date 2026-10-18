@@ -15,7 +15,9 @@ RELEASE_NOTES_PATH="$DIST_DIR/RELEASE_NOTES.txt"
 VOLUME_NAME="${CONDUIT_DMG_VOLUME_NAME:-Conduit}"
 RELEASE_CHANNEL="${CONDUIT_RELEASE_CHANNEL:-local-preview}"
 RELEASE_NOTES="${CONDUIT_RELEASE_NOTES:-Local preview DMG generated from this checkout. This artifact is unsigned and not notarized.}"
-OK_RELEASE_SIGNER="${OK_RELEASE_SIGNER:-/Users/jon/Projects/utilities/ok-release-tools/scripts/sign-manifest.mjs}"
+# Path to the O+K release-manifest signer (ok-release-tools/scripts/sign-manifest.mjs). Required only when
+# OK_RELEASE_PRIVATE_KEY_PEM is set; there is deliberately no machine-local default.
+OK_RELEASE_SIGNER="${OK_RELEASE_SIGNER:-}"
 MODE="${1:-}"
 
 if ! command -v hdiutil >/dev/null 2>&1; then
@@ -129,6 +131,10 @@ process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 
 if [[ -n "${OK_RELEASE_PRIVATE_KEY_PEM:-}" ]]; then
+  if [[ -z "$OK_RELEASE_SIGNER" || ! -f "$OK_RELEASE_SIGNER" ]]; then
+    echo "OK_RELEASE_PRIVATE_KEY_PEM is set but OK_RELEASE_SIGNER does not point at sign-manifest.mjs." >&2
+    exit 1
+  fi
   OK_RELEASE_PRIVATE_KEY_PEM="$OK_RELEASE_PRIVATE_KEY_PEM" \
   OK_RELEASE_PUBLISHER_ID="${OK_RELEASE_PUBLISHER_ID:-owl-kestrel}" \
   OK_RELEASE_PUBLISHER_NAME="${OK_RELEASE_PUBLISHER_NAME:-Owl & Kestrel}" \

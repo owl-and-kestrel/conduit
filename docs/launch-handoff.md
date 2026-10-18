@@ -91,7 +91,7 @@ Later, for the Web Store path:
 
 ## Release Checklist
 
-Run from `/Users/jon/Projects/conduit`:
+Run from the repository root:
 
 ```txt
 npm install

@@ -3,6 +3,8 @@ import Foundation
 
 // Which processes belong to a service tree this app launched, and how Stop all
 // signals them without hitting anything else (review finding F-04).
+// The Node services run the same rules in TypeScript:
+// src/runtime/process-tree.ts.
 //
 // A launched service is `/bin/zsh -lc "... exec npm ..."` started with
 // Foundation's Process, which makes the child the leader of a new process

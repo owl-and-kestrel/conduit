@@ -1,0 +1,598 @@
+{
+  "schema": "conduit.demo.start-a-server.v1",
+  "statement": "Better than curl | sh: a web page asks Conduit once to start a game server on this computer, which a page alone cannot do (browsers cannot accept connections). Approval runs the code; it does not make it safe. The game ends itself.",
+  "startedAt": "2026-10-19T14:30:06.022Z",
+  "finishedAt": "2026-10-19T14:30:13.952Z",
+  "node": "v22.23.2",
+  "platform": "linux-arm64",
+  "entrySha256": "0d0013fbd7530a6fa2dc478c0eac10fba86554d43896dc1b8814f932da2ce74b",
+  "arms": [
+    {
+      "arm": "A play + End game",
+      "start": {
+        "asks": 1,
+        "pendingAfterApprove": 0,
+        "openToAskMs": 14,
+        "approveToReadyMs": 100,
+        "readyToPageMs": 8,
+        "timeToPlayableMs": 122,
+        "host": "127.0.0.1",
+        "state": "ready"
+      },
+      "players": 3,
+      "movesPerPlayer": 100,
+      "movesDelivered": "600/600",
+      "pairs": [
+        {
+          "sender": "Bot 2",
+          "observer": "Bot 1",
+          "delivered": 100,
+          "inOrder": true
+        },
+        {
+          "sender": "Bot 3",
+          "observer": "Bot 1",
+          "delivered": 100,
+          "inOrder": true
+        },
+        {
+          "sender": "Bot 1",
+          "observer": "Bot 2",
+          "delivered": 100,
+          "inOrder": true
+        },
+        {
+          "sender": "Bot 3",
+          "observer": "Bot 2",
+          "delivered": 100,
+          "inOrder": true
+        },
+        {
+          "sender": "Bot 1",
+          "observer": "Bot 3",
+          "delivered": 100,
+          "inOrder": true
+        },
+        {
+          "sender": "Bot 2",
+          "observer": "Bot 3",
+          "delivered": 100,
+          "inOrder": true
+        }
+      ],
+      "latencyMs": {
+        "p50": 0.9,
+        "p95": 1.6,
+        "max": 7.8,
+        "samples": 600
+      },
+      "endToExitMs": 37,
+      "exitCode": 0,
+      "signal": null,
+      "processesLeft": 0,
+      "portRefused": true
+    },
+    {
+      "arm": "B last player leaves",
+      "start": {
+        "asks": 1,
+        "pendingAfterApprove": 0,
+        "openToAskMs": 5,
+        "approveToReadyMs": 91,
+        "readyToPageMs": 7,
+        "timeToPlayableMs": 104,
+        "host": "127.0.0.1",
+        "state": "ready"
+      },
+      "emptyGraceMs": 5000,
+      "leaveToExitMs": 5021,
+      "exitCode": 0,
+      "signal": null,
+      "processesLeft": 0,
+      "portRefused": true
+    },
+    {
+      "arm": "C Stop (SIGTERM)",
+      "start": {
+        "asks": 1,
+        "pendingAfterApprove": 0,
+        "openToAskMs": 4,
+        "approveToReadyMs": 85,
+        "readyToPageMs": 7,
+        "timeToPlayableMs": 96,
+        "host": "127.0.0.1",
+        "state": "ready"
+      },
+      "stopToExitMs": 115,
+      "exitCode": 0,
+      "signal": null,
+      "processesLeft": 0,
+      "portRefused": true
+    },
+    {
+      "arm": "E package: ask once, then never",
+      "packageBytes": 20091,
+      "packageSha256": "8cd091b223a8a2474edbb1184cae1a38698eeb2d6dc1f51449d67d5c904834b3",
+      "first": {
+        "asks": 1,
+        "pendingAfterApprove": 0,
+        "openToAskMs": 4,
+        "approveToReadyMs": 117,
+        "readyToPageMs": 7,
+        "timeToPlayableMs": 129,
+        "host": "127.0.0.1",
+        "state": "ready",
+        "packageCached": false,
+        "bytesFetched": 20091
+      },
+      "firstEndToExit": {
+        "exitCode": 0,
+        "signal": null
+      },
+      "second": {
+        "asks": 0,
+        "pendingAfterApprove": 0,
+        "openToAskMs": null,
+        "approveToReadyMs": null,
+        "openToReadyMs": 81,
+        "readyToPageMs": 6,
+        "timeToPlayableMs": 87,
+        "host": "127.0.0.1",
+        "state": "ready",
+        "packageCached": true,
+        "bytesFetched": 0
+      },
+      "bytesServedTotal": 20091,
+      "changedPackage": {
+        "asks": 1,
+        "denied": true
+      }
+    },
+    {
+      "arm": "D parent loss (SIGKILL)",
+      "start": {
+        "asks": 1,
+        "pendingAfterApprove": 0,
+        "openToAskMs": 3,
+        "approveToReadyMs": 87,
+        "readyToPageMs": 7,
+        "timeToPlayableMs": 98,
+        "host": "127.0.0.1",
+        "state": "ready"
+      },
+      "parentLossToGoneMs": 354,
+      "processesLeft": 0,
+      "portRefused": true,
+      "controlExitCode": 0
+    }
+  ],
+  "checks": [
+    {
+      "arm": "A play + End game",
+      "check": "asks",
+      "expected": 1,
+      "actual": 1,
+      "pass": true
+    },
+    {
+      "arm": "A play + End game",
+      "check": "pendingAfterApprove",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "A play + End game",
+      "check": "state",
+      "expected": "ready",
+      "actual": "ready",
+      "pass": true
+    },
+    {
+      "arm": "A play + End game",
+      "check": "host",
+      "expected": "127.0.0.1",
+      "actual": "127.0.0.1",
+      "pass": true
+    },
+    {
+      "arm": "A play + End game",
+      "check": "movesRejected",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "A play + End game",
+      "check": "movesDelivered",
+      "expected": "600/600",
+      "actual": "600/600",
+      "pass": true
+    },
+    {
+      "arm": "A play + End game",
+      "check": "everyPair100of100InOrder",
+      "expected": true,
+      "actual": true,
+      "pass": true
+    },
+    {
+      "arm": "A play + End game",
+      "check": "endStatus",
+      "expected": 204,
+      "actual": 204,
+      "pass": true
+    },
+    {
+      "arm": "A play + End game",
+      "check": "playersToldEnd",
+      "expected": 3,
+      "actual": 3,
+      "pass": true
+    },
+    {
+      "arm": "A play + End game",
+      "check": "exitCode",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "A play + End game",
+      "check": "signal",
+      "expected": null,
+      "actual": null,
+      "pass": true
+    },
+    {
+      "arm": "A play + End game",
+      "check": "processesLeft",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "A play + End game",
+      "check": "portRefused",
+      "expected": true,
+      "actual": true,
+      "pass": true
+    },
+    {
+      "arm": "B last player leaves",
+      "check": "asks",
+      "expected": 1,
+      "actual": 1,
+      "pass": true
+    },
+    {
+      "arm": "B last player leaves",
+      "check": "pendingAfterApprove",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "B last player leaves",
+      "check": "state",
+      "expected": "ready",
+      "actual": "ready",
+      "pass": true
+    },
+    {
+      "arm": "B last player leaves",
+      "check": "host",
+      "expected": "127.0.0.1",
+      "actual": "127.0.0.1",
+      "pass": true
+    },
+    {
+      "arm": "B last player leaves",
+      "check": "endedAfterGrace",
+      "expected": ">= 5000 ms",
+      "actual": 5021,
+      "pass": true
+    },
+    {
+      "arm": "B last player leaves",
+      "check": "exitCode",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "B last player leaves",
+      "check": "signal",
+      "expected": null,
+      "actual": null,
+      "pass": true
+    },
+    {
+      "arm": "B last player leaves",
+      "check": "processesLeft",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "B last player leaves",
+      "check": "portRefused",
+      "expected": true,
+      "actual": true,
+      "pass": true
+    },
+    {
+      "arm": "C Stop (SIGTERM)",
+      "check": "asks",
+      "expected": 1,
+      "actual": 1,
+      "pass": true
+    },
+    {
+      "arm": "C Stop (SIGTERM)",
+      "check": "pendingAfterApprove",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "C Stop (SIGTERM)",
+      "check": "state",
+      "expected": "ready",
+      "actual": "ready",
+      "pass": true
+    },
+    {
+      "arm": "C Stop (SIGTERM)",
+      "check": "host",
+      "expected": "127.0.0.1",
+      "actual": "127.0.0.1",
+      "pass": true
+    },
+    {
+      "arm": "C Stop (SIGTERM)",
+      "check": "playerToldWhy",
+      "expected": "stopped",
+      "actual": "stopped",
+      "pass": true
+    },
+    {
+      "arm": "C Stop (SIGTERM)",
+      "check": "stoppedBy",
+      "expected": "person",
+      "actual": "person",
+      "pass": true
+    },
+    {
+      "arm": "C Stop (SIGTERM)",
+      "check": "exitCode",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "C Stop (SIGTERM)",
+      "check": "signal",
+      "expected": null,
+      "actual": null,
+      "pass": true
+    },
+    {
+      "arm": "C Stop (SIGTERM)",
+      "check": "processesLeft",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "C Stop (SIGTERM)",
+      "check": "portRefused",
+      "expected": true,
+      "actual": true,
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never (first start)",
+      "check": "asks",
+      "expected": 1,
+      "actual": 1,
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never (first start)",
+      "check": "pendingAfterApprove",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never (first start)",
+      "check": "state",
+      "expected": "ready",
+      "actual": "ready",
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never (first start)",
+      "check": "host",
+      "expected": "127.0.0.1",
+      "actual": "127.0.0.1",
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never",
+      "check": "firstStartFetchedPackage",
+      "expected": 20091,
+      "actual": 20091,
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never",
+      "check": "firstEndGameExitCode",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never",
+      "check": "secondStartAsks",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never",
+      "check": "secondStartBytesFetched",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never",
+      "check": "secondStartBytesServed",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never",
+      "check": "secondEndGameExitCode",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never",
+      "check": "processesLeft",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never",
+      "check": "changedPackageAsks",
+      "expected": 1,
+      "actual": 1,
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never",
+      "check": "changedPackageDeniedStartsNothing",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "E package: ask once, then never",
+      "check": "changedPackageNotFetchedBeforeApproval",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "D parent loss (SIGKILL)",
+      "check": "asks",
+      "expected": 1,
+      "actual": 1,
+      "pass": true
+    },
+    {
+      "arm": "D parent loss (SIGKILL)",
+      "check": "pendingAfterApprove",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "D parent loss (SIGKILL)",
+      "check": "state",
+      "expected": "ready",
+      "actual": "ready",
+      "pass": true
+    },
+    {
+      "arm": "D parent loss (SIGKILL)",
+      "check": "host",
+      "expected": "127.0.0.1",
+      "actual": "127.0.0.1",
+      "pass": true
+    },
+    {
+      "arm": "D parent loss (SIGKILL)",
+      "check": "processesLeft",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "D parent loss (SIGKILL)",
+      "check": "goneWithin2s",
+      "expected": "<= 2000 ms",
+      "actual": 354,
+      "pass": true
+    },
+    {
+      "arm": "D parent loss (SIGKILL)",
+      "check": "portRefused",
+      "expected": true,
+      "actual": true,
+      "pass": true
+    },
+    {
+      "arm": "D parent loss (SIGKILL)",
+      "check": "controlExitCode",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "all",
+      "check": "gameProcessesLeftAtExit",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "all",
+      "check": "controlStopped",
+      "expected": true,
+      "actual": true,
+      "pass": true
+    }
+  ],
+  "failure": null,
+  "pass": true,
+  "totals": {
+    "starts": 6,
+    "asksPerStart": [
+      1,
+      1,
+      1,
+      1,
+      0,
+      1
+    ],
+    "packageSecondStart": {
+      "asks": 0,
+      "bytesFetched": 0
+    },
+    "timeToPlayableMs": {
+      "values": [
+        122,
+        104,
+        96,
+        129,
+        87,
+        98
+      ],
+      "p50": 98,
+      "max": 129
+    },
+    "movesDelivered": "600/600",
+    "processesLeftAfterEndGame": 0,
+    "gameProcessesLeftAtExit": 0
+  },
+  "notMeasuredHere": [
+    "the macOS menu-bar ask, browser.open and a phone joining over a real LAN (S4)"
+  ]
+}

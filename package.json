@@ -32,6 +32,7 @@
     "windows:package": "node ./script/package_windows.mjs",
     "eval:protocol": "tsx scripts/protocol-model-eval.ts",
     "demo:consent": "tsx scripts/demo-consent-loop.ts",
+    "demo:server": "tsx scripts/demo-server.ts",
     "site:dev": "tsx scripts/serve-site.ts",
     "screenshots": "tsx scripts/capture-screenshots.ts",
     "login": "tsx src/cli/index.ts login",

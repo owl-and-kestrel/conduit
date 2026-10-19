@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tiny Arena</title>
+<style>
+  :root { --bg: #f6f4ef; --card: #fff; --ink: #1d1b18; --muted: #6b665d; --line: #e0dbd1; --accent: #2d5bd1; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16150f; --card: #211f19; --ink: #f1ede4; --muted: #a8a194; --line: #38352c; --accent: #6d93f5; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 40px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1rem; margin: 0 0 8px; }
+  .lede { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 0 0 16px; }
+  a.host { display: inline-block; padding: 14px 22px; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 600; text-decoration: none; }
+  code { font-size: .8rem; word-break: break-all; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; vertical-align: top; padding: 6px 8px; border-top: 1px solid var(--line); }
+  details { margin-top: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tiny Arena</h1>
+  <p class="lede">A multiplayer game your phone joins over Wi-Fi. This page cannot host it: browsers cannot accept incoming connections. Conduit runs the game server on this computer after asking you once.</p>
+
+  <section class="card">
+    <a id="hostLink" class="host" href="#">Host game</a>
+    <p>Conduit will show you what it is about to run: <code>server.mjs</code> (sha256 <code id="sha"></code>) on Conduit's own Node, accepting connections from your network. Conduit is not a safety product: approving runs this code; it does not make the code safe.</p>
+    <p>The game ends itself when the last player leaves or when you press End game.</p>
+    <details>
+      <summary>The request this link carries</summary>
+      <pre><code id="requestText"></code></pre>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2>What works today, and what later slices add</h2>
+    <table>
+      <tr><th>Step</th><th>This link today</th><th>Next</th></tr>
+      <tr><td>Click Host game</td><td>The <code>conduit://</code> link reaches Conduit (macOS app, then Control <code>POST /api/url/open</code>) and becomes one review ask.</td><td>S4: the menu-bar ask shows the sha256 and "accepts connections from your network".</td></tr>
+      <tr><td>Approve</td><td><code>service.start</code> runs <code>server.mjs</code> from Conduit Control's project root (only when Conduit runs with <code>CONDUIT_DEMO_PROFILE=1</code>), pinned by the entry's sha256 (this link's pin covers <code>server.mjs</code> only, not the files it imports). The game URL is in the approval result; you open it.</td><td>Package form (S2, in Conduit now): once this package has a published https URL, the link names <code>{url, sha256}</code>; Conduit fetches and verifies it into a content-addressed cache and runs it from there, so the hash covers every file. S4: the browser opens the game when it is ready.</td></tr>
+      <tr><td>Host again</td><td>Asks again.</td><td>Package form: "Always allow this exact package" gives 0 asks and 0 bytes downloaded for the same sha256; a different hash asks again (measured by <code>npm run demo:server</code>).</td></tr>
+      <tr><td>While it runs</td><td><code>conduit services list|stop</code>; Stop sends SIGTERM and the game exits 0.</td><td>S4: a Services row in the menu bar with Stop.</td></tr>
+    </table>
+  </section>
+</main>
+
+<!-- The request, verbatim. __ENTRY_SHA256__ is replaced with ENTRY_SHA256
+     below. tests/demo/tiny-arena-server.test.ts keeps ENTRY_SHA256 equal to
+     the sha256 of server.mjs. -->
+<script type="application/json" id="request">
+{
+  "schema": "conduit.request.v1",
+  "source": { "kind": "web", "trust": "untrusted" },
+  "title": "Host Tiny Arena",
+  "description": "Start the Tiny Arena game server on this computer so phones on your Wi-Fi can join.",
+  "actions": [
+    {
+      "id": "host",
+      "tool": "service.start",
+      "args": { "name": "Tiny Arena", "path": "server.mjs", "sha256": "__ENTRY_SHA256__", "lan": true }
+    }
+  ]
+}
+</script>
+<script>
+(() => {
+  const ENTRY_SHA256 = '0d0013fbd7530a6fa2dc478c0eac10fba86554d43896dc1b8814f932da2ce74b';
+  const text = document.getElementById('request').textContent.replace('__ENTRY_SHA256__', ENTRY_SHA256);
+  const request = JSON.parse(text);
+  // Same encoding as createConduitUrl in src/protocol/conduit-url.ts:
+  // base64url of the UTF-8 JSON, no padding.
+  const bytes = new TextEncoder().encode(JSON.stringify(request));
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  const payload = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  document.getElementById('hostLink').href = `conduit://run?payload=${payload}`;
+  document.getElementById('sha').textContent = ENTRY_SHA256.slice(0, 12) + '...';
+  document.getElementById('requestText').textContent = JSON.stringify(request, null, 2);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tiny Arena</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --card: #ffffff; --ink: #1d1b18; --muted: #6b665d; --line: #e0dbd1;
+    --accent: #2d5bd1; --danger: #b8322a; --cell: #f1eee7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16150f; --card: #211f19; --ink: #f1ede4; --muted: #a8a194; --line: #38352c; --accent: #6d93f5; --danger: #e0625a; --cell: #2b2921; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+  main { max-width: 520px; margin: 0 auto; padding: 12px 16px 24px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  h1 { font-size: 1.25rem; margin: 4px 0 8px; }
+  #status { color: var(--muted); font-size: .85rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 0 0 12px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row > .grow { flex: 1; min-width: 0; }
+  input, button { font: inherit; }
+  input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); }
+  button { min-height: 48px; padding: 0 16px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer; }
+  button.ghost { background: var(--cell); color: var(--ink); }
+  button.danger { background: var(--danger); }
+  button:disabled { opacity: .45; cursor: default; }
+  #banner { display: none; background: var(--ink); color: var(--bg); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+  #arena { display: none; }
+  #hud { display: flex; justify-content: space-between; align-items: baseline; margin: 0 0 8px; font-weight: 600; }
+  #timer { font-variant-numeric: tabular-nums; }
+  /* touch-action only on the board, so the page itself still scrolls. */
+  #board { position: relative; display: grid; grid-template-columns: repeat(12, 1fr); gap: 2px; aspect-ratio: 1; padding: 2px;
+           background: var(--line); border-radius: 10px; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .cell { background: var(--cell); border-radius: 3px; transition: background-color 120ms; }
+  .dot { position: absolute; display: grid; place-items: center; border-radius: 50%; color: #fff; font-weight: 700; font-size: .75rem;
+         pointer-events: none; box-shadow: 0 0 0 2px rgba(0,0,0,.25); transition: left 80ms linear, top 80ms linear; }
+  .dot.me { box-shadow: 0 0 0 3px var(--ink); }
+  #scores { width: 100%; border-collapse: collapse; font-size: .9rem; margin-top: 8px; }
+  #scores td { padding: 4px 2px; border-bottom: 1px solid var(--line); }
+  #scores td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  #dpad { display: grid; grid-template-columns: repeat(3, 64px); grid-template-rows: repeat(3, 64px); gap: 6px; justify-content: center; margin: 12px 0; touch-action: none; }
+  #dpad button { min-height: 0; padding: 0; font-size: 1.4rem; background: var(--cell); color: var(--ink); }
+  #dpad .up { grid-area: 1 / 2; } #dpad .left { grid-area: 2 / 1; } #dpad .right { grid-area: 2 / 3; } #dpad .down { grid-area: 3 / 2; }
+  #host { display: none; }
+  #host img { width: 200px; height: 200px; display: block; margin: 8px auto; image-rendering: pixelated; background: #fff; border-radius: 8px; }
+  #host code { display: block; word-break: break-all; font-size: .75rem; color: var(--muted); text-align: center; }
+  .hint { color: var(--muted); font-size: .85rem; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Tiny Arena</h1><span id="status">not joined</span></header>
+  <div id="banner" role="status"></div>
+
+  <section id="joinCard" class="card">
+    <p style="margin:0 0 8px">Paint the arena: every step paints a cell your color, and you can steal other players' cells. Most cells when the round ends wins.</p>
+    <div class="row">
+      <input id="name" class="grow" maxlength="16" placeholder="Your name" autocomplete="nickname">
+      <button id="joinBtn">Join</button>
+    </div>
+  </section>
+
+  <section id="host" class="card">
+    <strong>Invite phones on this Wi-Fi</strong>
+    <img id="qr" alt="QR code with the join link">
+    <code id="joinUrl"></code>
+    <p id="hostNote" class="hint"></p>
+    <div class="row" style="margin-top:8px"><span class="grow"></span><button id="endBtn" class="danger">End game</button></div>
+  </section>
+
+  <section id="arena">
+    <div id="hud"><span id="phase">Lobby</span><span id="timer"></span></div>
+    <div id="board" aria-label="arena"></div>
+    <div id="dpad">
+      <button class="up" data-dir="up" aria-label="up">&#9650;</button>
+      <button class="left" data-dir="left" aria-label="left">&#9664;</button>
+      <button class="right" data-dir="right" aria-label="right">&#9654;</button>
+      <button class="down" data-dir="down" aria-label="down">&#9660;</button>
+    </div>
+    <div class="row"><button id="startBtn" class="grow">Start round</button><button id="leaveBtn" class="ghost">Leave</button></div>
+    <p class="hint">Swipe on the board, tap the arrows, or use the arrow keys / WASD.</p>
+    <table id="scores"></table>
+  </section>
+</main>
+
+<script>
+(() => {
+  'use strict';
+  // The room key from the QR link rides on every API call. The host's own
+  // screen (loopback) does not need one.
+  const key = new URLSearchParams(location.search).get('k') || '';
+  const api = (path, query = {}) => {
+    const params = new URLSearchParams(query);
+    if (key) params.set('k', key);
+    const qs = params.toString();
+    return qs ? `${path}?${qs}` : path;
+  };
+  const post = (path, body) => fetch(api(path), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  const $ = (id) => document.getElementById(id);
+
+  // Local copy of the server state: snapshots replace it, mv events patch it.
+  const state = { me: null, token: null, seq: 0, source: null, snap: null, ended: false };
+  const cells = [];
+  const dots = new Map();
+
+  function banner(text) { $('banner').textContent = text; $('banner').style.display = 'block'; }
+  function status(text) { $('status').textContent = text; }
+
+  function colorOf(id) {
+    const player = state.snap.players.find((p) => p.id === id);
+    return player ? '#' + player.color : null;
+  }
+
+  function paintCell(index) {
+    const owner = state.snap.board[index];
+    const color = owner ? colorOf(owner) : null;
+    cells[index].style.background = color ? color + '99' : '';
+  }
+
+  function placeDot(player) {
+    let dot = dots.get(player.id);
+    if (!dot) {
+      dot = document.createElement('div');
+      dot.className = 'dot' + (player.id === state.me ? ' me' : '');
+      dot.textContent = (player.name || '?').slice(0, 1).toUpperCase();
+      $('board').appendChild(dot);
+      dots.set(player.id, dot);
+    }
+    const { cols, rows } = state.snap;
+    dot.style.background = '#' + player.color;
+    dot.style.width = `calc(${100 / cols}% - 6px)`;
+    dot.style.height = `calc(${100 / rows}% - 6px)`;
+    dot.style.left = `calc(${(player.x * 100) / cols}% + 3px)`;
+    dot.style.top = `calc(${(player.y * 100) / rows}% + 3px)`;
+  }
+
+  function render() {
+    const snap = state.snap;
+    const board = $('board');
+    if (cells.length !== snap.cols * snap.rows) {
+      board.textContent = '';
+      cells.length = 0;
+      dots.clear();
+      board.style.gridTemplateColumns = `repeat(${snap.cols}, 1fr)`;
+      for (let i = 0; i < snap.cols * snap.rows; i += 1) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        board.appendChild(cell);
+        cells.push(cell);
+      }
+    }
+    snap.board.forEach((_, i) => paintCell(i));
+    const present = new Set(snap.players.map((p) => p.id));
+    for (const [id, dot] of dots) {
+      if (!present.has(id)) { dot.remove(); dots.delete(id); }
+    }
+    snap.players.forEach(placeDot);
+    renderScores();
+    renderPhase();
+  }
+
+  function renderScores() {
+    const counts = new Map();
+    for (const owner of state.snap.board) if (owner) counts.set(owner, (counts.get(owner) || 0) + 1);
+    const rows = state.snap.players
+      .map((p) => ({ ...p, cells: counts.get(p.id) || 0 }))
+      .sort((a, b) => b.cells - a.cells || a.id.localeCompare(b.id));
+    const table = $('scores');
+    table.textContent = '';
+    for (const row of rows) {
+      const tr = table.insertRow();
+      const name = tr.insertCell();
+      const swatch = document.createElement('span');
+      swatch.className = 'swatch';
+      swatch.style.background = '#' + row.color;
+      name.append(swatch, row.name + (row.id === state.me ? ' (you)' : ''));
+      tr.insertCell().textContent = String(row.cells);
+    }
+  }
+
+  function renderPhase() {
+    const phase = state.snap.phase;
+    $('phase').textContent = phase === 'playing' ? 'Paint!' : phase === 'results' ? 'Round over' : 'Lobby';
+    $('startBtn').disabled = phase === 'playing' || state.ended;
+    tickTimer();
+  }
+
+  function tickTimer() {
+    if (!state.snap) return;
+    if (state.snap.phase !== 'playing') { $('timer').textContent = ''; return; }
+    // endsAt is server time; msLeft at snapshot time keeps clock skew out.
+    const left = Math.max(0, state.snap.localEndsAt - Date.now());
+    $('timer').textContent = `${Math.ceil(left / 1000)} s`;
+  }
+  setInterval(tickTimer, 250);
+
+  function takeSnapshot(snap) {
+    state.snap = { ...snap, localEndsAt: Date.now() + (snap.msLeft || 0) };
+    render();
+  }
+
+  function onEvent(message) {
+    const event = JSON.parse(message.data);
+    if (event.snapshot) takeSnapshot(event.snapshot);
+    if (event.t === 'mv' && state.snap) {
+      const player = state.snap.players.find((p) => p.id === event.id);
+      if (player) {
+        player.x = event.x;
+        player.y = event.y;
+        placeDot(player);
+      }
+      if (event.painted) {
+        const index = event.y * state.snap.cols + event.x;
+        state.snap.board[index] = event.id;
+        paintCell(index);
+        renderScores();
+      }
+    } else if (event.t === 'results') {
+      const top = event.scores[0];
+      banner(top && top.cells > 0 ? `${top.name} wins with ${top.cells} cells.` : 'Round over.');
+    } else if (event.t === 'round') {
+      $('banner').style.display = 'none';
+    } else if (event.t === 'end') {
+      gameOver(event.reason);
+    }
+  }
+
+  function gameOver(reason) {
+    state.ended = true;
+    if (state.source) { state.source.close(); state.source = null; }
+    banner(`Game over: ${reason}. The server has ended itself.`);
+    status('ended');
+    document.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+  }
+
+  function listen() {
+    state.source = new EventSource(api('/events', { id: state.me, token: state.token }));
+    state.source.onopen = () => status('connected');
+    state.source.onmessage = onEvent;
+    state.source.onerror = () => { if (!state.ended) status('reconnecting...'); };
+  }
+
+  async function join() {
+    $('joinBtn').disabled = true;
+    try {
+      const response = await post('/api/join', { name: $('name').value });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || String(response.status));
+      state.me = body.id;
+      state.token = body.token;
+      $('joinCard').style.display = 'none';
+      $('arena').style.display = 'block';
+      listen();
+    } catch (error) {
+      status(`could not join: ${error.message}`);
+      $('joinBtn').disabled = false;
+    }
+  }
+
+  function move(dir) {
+    if (!state.me || state.ended) return;
+    state.seq += 1;
+    // The server is the source of truth: the dot moves when its mv event arrives.
+    post('/api/move', { id: state.me, token: state.token, dir, seq: state.seq }).catch(() => status('server unreachable'));
+  }
+
+  function leave() {
+    if (!state.me) return;
+    // Works during pagehide, when an ordinary fetch may be cancelled.
+    navigator.sendBeacon(api('/api/leave'), JSON.stringify({ id: state.me, token: state.token }));
+    state.me = null;
+    if (state.source) { state.source.close(); state.source = null; }
+  }
+
+  async function setupHost() {
+    try {
+      const info = await (await fetch(api('/api/info'))).json();
+      if (!info.isHost) return;
+      $('host').style.display = 'block';
+      if (info.joinUrl) {
+        $('qr').src = '/join.svg';
+        $('joinUrl').textContent = info.joinUrl;
+        $('hostNote').textContent = 'Phones on the same Wi-Fi scan this to join. The game ends itself when the last player leaves.';
+      } else {
+        $('qr').style.display = 'none';
+        $('hostNote').textContent = 'Phones cannot join: this game was started on loopback only (ask Conduit with lan: true).';
+      }
+    } catch { /* not reachable: the join card says so on Join */ }
+  }
+
+  $('joinBtn').addEventListener('click', join);
+  $('name').addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
+  $('startBtn').addEventListener('click', () => post('/api/start', { id: state.me, token: state.token }));
+  $('leaveBtn').addEventListener('click', () => { leave(); location.reload(); });
+  $('endBtn').addEventListener('click', async () => {
+    try { await post('/api/end'); } catch { /* the server may close first */ }
+    gameOver('host ended the game');
+  });
+  document.querySelectorAll('#dpad button').forEach((button) => {
+    button.addEventListener('pointerdown', (e) => { e.preventDefault(); move(button.dataset.dir); });
+  });
+  const keys = { arrowup: 'up', arrowdown: 'down', arrowleft: 'left', arrowright: 'right', w: 'up', a: 'left', s: 'down', d: 'right' };
+  document.addEventListener('keydown', (e) => {
+    if (e.target instanceof HTMLInputElement) return;
+    const dir = keys[e.key.toLowerCase()];
+    if (dir) { e.preventDefault(); move(dir); }
+  });
+  let swipe = null;
+  $('board').addEventListener('pointerdown', (e) => { swipe = { x: e.clientX, y: e.clientY }; });
+  $('board').addEventListener('pointerup', (e) => {
+    if (!swipe) return;
+    const dx = e.clientX - swipe.x;
+    const dy = e.clientY - swipe.y;
+    swipe = null;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) return;
+    move(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+  });
+  window.addEventListener('pagehide', leave);
+  setupHost();
+})();
+</script>
+</body>
+</html>

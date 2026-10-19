@@ -243,7 +243,11 @@ function armEmptyTimer() {
 
 function endRound() {
   roundTimer = null;
-  const now = Date.now();
+  // The timer is the authority on when the round is over. setTimeout can fire
+  // a few ms before Date.now() reaches endsAt (Node schedules timers from its
+  // cached loop time; a probe saw it in 1 of 40 rounds), and tick(Date.now())
+  // would then leave the round playing forever with no timer left to end it.
+  const now = Math.max(Date.now(), game.endsAt);
   if (game.tick(now)) broadcast({ t: 'results', scores: game.lastResults, snapshot: game.snapshot(now) });
 }
 

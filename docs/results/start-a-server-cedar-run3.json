@@ -1,21 +1,21 @@
 {
   "schema": "conduit.demo.start-a-server.v1",
   "statement": "Better than curl | sh: a web page asks Conduit once to start a game server on this computer, which a page alone cannot do (browsers cannot accept connections). Approval runs the code; it does not make it safe. The game ends itself.",
-  "startedAt": "2026-10-19T14:30:32.570Z",
-  "finishedAt": "2026-10-19T14:30:40.498Z",
+  "startedAt": "2026-10-19T14:51:32.124Z",
+  "finishedAt": "2026-10-19T14:51:40.052Z",
   "node": "v22.23.2",
   "platform": "linux-arm64",
-  "entrySha256": "0d0013fbd7530a6fa2dc478c0eac10fba86554d43896dc1b8814f932da2ce74b",
+  "entrySha256": "66d427f2fa4dec20f6308a8190a3dcab7299c80d8fbabc9d774c71bbb76a94de",
   "arms": [
     {
       "arm": "A play + End game",
       "start": {
         "asks": 1,
         "pendingAfterApprove": 0,
-        "openToAskMs": 16,
-        "approveToReadyMs": 101,
-        "readyToPageMs": 9,
-        "timeToPlayableMs": 125,
+        "openToAskMs": 15,
+        "approveToReadyMs": 97,
+        "readyToPageMs": 8,
+        "timeToPlayableMs": 120,
         "host": "127.0.0.1",
         "state": "ready"
       },
@@ -61,9 +61,9 @@
         }
       ],
       "latencyMs": {
-        "p50": 1.1,
-        "p95": 1.9,
-        "max": 6.6,
+        "p50": 0.9,
+        "p95": 1.8,
+        "max": 5.9,
         "samples": 600
       },
       "endToExitMs": 37,
@@ -77,15 +77,15 @@
       "start": {
         "asks": 1,
         "pendingAfterApprove": 0,
-        "openToAskMs": 6,
+        "openToAskMs": 7,
         "approveToReadyMs": 84,
         "readyToPageMs": 7,
-        "timeToPlayableMs": 97,
+        "timeToPlayableMs": 98,
         "host": "127.0.0.1",
         "state": "ready"
       },
       "emptyGraceMs": 5000,
-      "leaveToExitMs": 5008,
+      "leaveToExitMs": 5019,
       "exitCode": 0,
       "signal": null,
       "processesLeft": 0,
@@ -97,13 +97,13 @@
         "asks": 1,
         "pendingAfterApprove": 0,
         "openToAskMs": 4,
-        "approveToReadyMs": 81,
+        "approveToReadyMs": 85,
         "readyToPageMs": 7,
-        "timeToPlayableMs": 92,
+        "timeToPlayableMs": 96,
         "host": "127.0.0.1",
         "state": "ready"
       },
-      "stopToExitMs": 115,
+      "stopToExitMs": 117,
       "exitCode": 0,
       "signal": null,
       "processesLeft": 0,
@@ -111,19 +111,19 @@
     },
     {
       "arm": "E package: ask once, then never",
-      "packageBytes": 20091,
-      "packageSha256": "8cd091b223a8a2474edbb1184cae1a38698eeb2d6dc1f51449d67d5c904834b3",
+      "packageBytes": 20234,
+      "packageSha256": "e3142d63f000f47b7e8f0c7c6bde6d070cd38974a5664a5bd03551e091d36863",
       "first": {
         "asks": 1,
         "pendingAfterApprove": 0,
         "openToAskMs": 4,
         "approveToReadyMs": 117,
         "readyToPageMs": 7,
-        "timeToPlayableMs": 128,
+        "timeToPlayableMs": 129,
         "host": "127.0.0.1",
         "state": "ready",
         "packageCached": false,
-        "bytesFetched": 20091
+        "bytesFetched": 20234
       },
       "firstEndToExit": {
         "exitCode": 0,
@@ -135,14 +135,14 @@
         "openToAskMs": null,
         "approveToReadyMs": null,
         "openToReadyMs": 82,
-        "readyToPageMs": 6,
-        "timeToPlayableMs": 89,
+        "readyToPageMs": 7,
+        "timeToPlayableMs": 88,
         "host": "127.0.0.1",
         "state": "ready",
         "packageCached": true,
         "bytesFetched": 0
       },
-      "bytesServedTotal": 20091,
+      "bytesServedTotal": 20234,
       "changedPackage": {
         "asks": 1,
         "denied": true
@@ -154,13 +154,13 @@
         "asks": 1,
         "pendingAfterApprove": 0,
         "openToAskMs": 4,
-        "approveToReadyMs": 84,
+        "approveToReadyMs": 82,
         "readyToPageMs": 7,
-        "timeToPlayableMs": 94,
+        "timeToPlayableMs": 92,
         "host": "127.0.0.1",
         "state": "ready"
       },
-      "parentLossToGoneMs": 381,
+      "parentLossToGoneMs": 382,
       "processesLeft": 0,
       "portRefused": true,
       "controlExitCode": 0
@@ -290,7 +290,7 @@
       "arm": "B last player leaves",
       "check": "endedAfterGrace",
       "expected": ">= 5000 ms",
-      "actual": 5008,
+      "actual": 5019,
       "pass": true
     },
     {
@@ -422,8 +422,8 @@
     {
       "arm": "E package: ask once, then never",
       "check": "firstStartFetchedPackage",
-      "expected": 20091,
-      "actual": 20091,
+      "expected": 20234,
+      "actual": 20234,
       "pass": true
     },
     {
@@ -528,7 +528,7 @@
       "arm": "D parent loss (SIGKILL)",
       "check": "goneWithin2s",
       "expected": "<= 2000 ms",
-      "actual": 381,
+      "actual": 382,
       "pass": true
     },
     {
@@ -578,15 +578,15 @@
     },
     "timeToPlayableMs": {
       "values": [
-        125,
-        97,
-        92,
-        128,
-        89,
-        94
+        120,
+        98,
+        96,
+        129,
+        88,
+        92
       ],
-      "p50": 94,
-      "max": 128
+      "p50": 96,
+      "max": 129
     },
     "movesDelivered": "600/600",
     "processesLeftAfterEndGame": 0,

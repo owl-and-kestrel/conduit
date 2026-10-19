@@ -48,27 +48,27 @@ package directory.
 
 ## Results (Cedar, linux-arm64, Node v22.23.2, npm 10.9.8)
 
-Three consecutive runs, 2026-10-19 14:30:06Z to 14:30:40Z UTC, on code tree
-`1851bde5`. The landed commit adds only these result files on top. All 56
-checks passed in each run.
+Three consecutive runs, 2026-10-19 14:51:05Z to 14:51:40Z UTC, on code tree
+`39f4b4d6` (the round-end fix). The commit that carries these files adds only
+them on top. All 56 checks passed in each run.
 
 | Run | asks per start (A/B/C/E1/E2/D) | time to playable, ms (A/B/C/E1/E2/D) | moves delivered | latency p50 / p95 / max, ms | End game -> exit, ms | last leave -> exit, ms | Stop -> exit, ms | package bytes, E1 / E2 | changed package | parent kill -> group empty, ms | processes left |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| [1](start-a-server-cedar-run1.json) | 1/1/1/1/**0**/1 | 122 / 104 / 96 / 129 / 87 / 98 | 600/600 | 0.9 / 1.6 / 7.8 | 37 | 5021 | 115 | 20091 / **0** | 1 ask, denied | 354 | 0 |
-| [2](start-a-server-cedar-run2.json) | 1/1/1/1/**0**/1 | 123 / 99 / 94 / 131 / 89 / 96 | 600/600 | 1.1 / 1.6 / 6.2 | 37 | 5025 | 114 | 20091 / **0** | 1 ask, denied | 352 | 0 |
-| [3](start-a-server-cedar-run3.json) | 1/1/1/1/**0**/1 | 125 / 97 / 92 / 128 / 89 / 94 | 600/600 | 1.1 / 1.9 / 6.6 | 37 | 5008 | 115 | 20091 / **0** | 1 ask, denied | 381 | 0 |
+| [1](start-a-server-cedar-run1.json) | 1/1/1/1/**0**/1 | 121 / 96 / 94 / 130 / 91 / 94 | 600/600 | 0.9 / 1.6 / 7.1 | 37 | 5024 | 115 | 20234 / **0** | 1 ask, denied | 381 | 0 |
+| [2](start-a-server-cedar-run2.json) | 1/1/1/1/**0**/1 | 121 / 98 / 93 / 130 / 90 / 99 | 600/600 | 0.9 / 1.8 / 6.3 | 36 | 5021 | 116 | 20234 / **0** | 1 ask, denied | 355 | 0 |
+| [3](start-a-server-cedar-run3.json) | 1/1/1/1/**0**/1 | 120 / 98 / 96 / 129 / 88 / 92 | 600/600 | 0.9 / 1.8 / 5.9 | 37 | 5019 | 117 | 20234 / **0** | 1 ask, denied | 382 | 0 |
 
 Time to playable:
-- **Path-form starts with an ask** (A, B, C, D; 12 starts): p50 97 ms, max
-  125 ms.
-- **First package start** (fetch, verify, unpack, ask): 128-131 ms.
-- **Allowed package, no ask** (E2): 87-89 ms.
+- **Path-form starts with an ask** (A, B, C, D; 12 starts): p50 96 ms, max
+  121 ms.
+- **First package start** (fetch, verify, unpack, ask): 129-130 ms.
+- **Allowed package, no ask** (E2): 88-91 ms.
 
 How to read the numbers:
 - **Time to playable** is request -> ask (`POST /api/url/open`) plus approve
   -> `CONDUIT_READY` -> first page load (HTTP 200). With no ask, it is request
   -> page load. It leaves out the time a person spends reading the ask, which
-  is 0 in the harness. Approve -> ready (81-101 ms on path starts) is mostly
+  is 0 in the harness. Approve -> ready (82-99 ms on path starts) is mostly
   the game's Node start-up.
 - **Latency** is from one player sending a move to another player's stream
   receiving it, on loopback. A LAN adds the Wi-Fi round trip.
@@ -76,7 +76,7 @@ How to read the numbers:
   shutdown.
 - **Stop -> exit** includes Conduit's TERM and the game telling its players.
 - **Package bytes** are what Conduit reports it fetched (`bytesFetched`). The
-  harness's loopback server counted the same total, 20091 bytes, across all
+  harness's loopback server counted the same total, 20234 bytes, across all
   three starts. The package sha256 depends on the npm and zlib versions that
   pack it, so it differs between hosts. The harness computes it each run.
 

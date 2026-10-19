@@ -26,6 +26,8 @@ import { getControlStatus, pauseAll, resumeAll, stopAll } from './control-operat
 import { getControlIdentity } from './control-identity.js';
 import { renderAppHtml, renderAppJs } from './control-panel-ui.js';
 import { CONTROL_PANEL_DEFAULT_PORT, isLoopbackHostname, refuseNonLocalRequest } from '../util/loopback-guard.js';
+import { isDemoProfileEnabled } from '../runtime/demo-profile.js';
+import { serviceRegistry } from '../runtime/service-registry.js';
 
 export { renderAppJs };
 
@@ -126,7 +128,8 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           runs: true,
           pause: true,
           settings: true,
-          rememberForThisChat: true
+          rememberForThisChat: true,
+          ...(isDemoProfileEnabled() ? { demoProfile: true, services: true } : {})
         }
       });
       return;
@@ -277,6 +280,31 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         }
         throw error;
       }
+      return;
+    }
+
+    // Services (demo profile only). Off: the same 404 as any unknown route.
+    if (req.method === 'GET' && url.pathname === '/api/services') {
+      if (!isDemoProfileEnabled()) {
+        sendJson(res, 404, { error: 'Not found' });
+        return;
+      }
+      sendJson(res, 200, { services: serviceRegistry.list() });
+      return;
+    }
+
+    const serviceStopMatch = url.pathname.match(/^\/api\/services\/([^/]+)\/stop$/);
+    if (req.method === 'POST' && serviceStopMatch?.[1]) {
+      if (!isDemoProfileEnabled()) {
+        sendJson(res, 404, { error: 'Not found' });
+        return;
+      }
+      const service = await serviceRegistry.stop(decodeURIComponent(serviceStopMatch[1]));
+      if (!service) {
+        sendJson(res, 404, { error: 'Unknown service.' });
+        return;
+      }
+      sendJson(res, 200, { service });
       return;
     }
 

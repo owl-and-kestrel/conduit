@@ -21,11 +21,13 @@ import { startParentWatchdogFromEnv } from './parent-watchdog.js';
 import { getControlStatus, pauseAll, resumeAll, stopAll } from '../app/control-operations.js';
 import {
   CLI_ACTOR,
+  ControlApiError,
   ControlClient,
   formatApprovalDetail,
   formatApprovalLine,
   formatControlStatus,
-  formatRunLine
+  formatRunLine,
+  formatServiceLine
 } from './control-client.js';
 
 const program = new Command();
@@ -393,6 +395,59 @@ runsCommand.command('result')
   .action(async (runId: string, options: { url?: string; json: boolean }) => {
     const result = await new ControlClient({ url: options.url }).runResult(runId);
     console.log(options.json ? JSON.stringify(result, null, 2) : (result.result || '(no result text)'));
+  });
+
+const servicesCommand = program.command('services')
+  .description('Demo profile only: list or stop programs started by service.start (same API as the panel and menu bar).');
+
+// A 404 "Not found" from either services verb means Control is running without
+// the demo switch: say so plainly instead of a bare error.
+function reportDemoServicesError(error: unknown): boolean {
+  return error instanceof ControlApiError
+    && error.status === 404
+    && error.message === 'Not found';
+}
+
+servicesCommand.command('list')
+  .description('List services started by service.start in this Control process.')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--json', 'print the raw API response', false)
+  .action(async (options: { url?: string; json: boolean }) => {
+    try {
+      const result = await new ControlClient({ url: options.url }).listServices();
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      const services = result.services as any[];
+      console.log(services.length === 0 ? 'No services.' : services.map(formatServiceLine).join('\n'));
+    } catch (error) {
+      if (reportDemoServicesError(error)) {
+        console.error('Conduit Control is not running with the demo profile (CONDUIT_DEMO_PROFILE=1), so it has no services.');
+        process.exitCode = 1;
+        return;
+      }
+      throw error;
+    }
+  });
+
+servicesCommand.command('stop')
+  .description('Stop one service the person started through service.start.')
+  .argument('<serviceId>', 'service id')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--json', 'print the raw API response', false)
+  .action(async (serviceId: string, options: { url?: string; json: boolean }) => {
+    try {
+      const result = await new ControlClient({ url: options.url }).stopService(serviceId);
+      console.log(options.json ? JSON.stringify(result, null, 2) : formatServiceLine(result.service));
+    } catch (error) {
+      if (reportDemoServicesError(error)) {
+        console.error('Conduit Control is not running with the demo profile (CONDUIT_DEMO_PROFILE=1), so it has no services.');
+        process.exitCode = 1;
+        return;
+      }
+      throw error;
+    }
   });
 
 program.command('login:system')

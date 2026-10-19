@@ -23,6 +23,8 @@ export const CONTROL_CLI_ROUTES = {
   'settings set': { method: 'POST', path: '/api/settings' },
   'runs list': { method: 'GET', path: '/api/runs' },
   'runs result': { method: 'GET', path: '/api/runs/:id/result' },
+  'services list': { method: 'GET', path: '/api/services' },
+  'services stop': { method: 'POST', path: '/api/services/:id/stop' },
   'app status': { method: 'GET', path: '/api/status' },
   diagnostics: { method: 'GET', path: '/api/diagnostics' },
   'session handshake': { method: 'POST', path: '/api/agent-handshake' },
@@ -123,6 +125,14 @@ export class ControlClient {
     return this.call('runs result', { id: runId });
   }
 
+  listServices(): Promise<any> {
+    return this.call('services list');
+  }
+
+  stopService(serviceId: string): Promise<any> {
+    return this.call('services stop', { id: serviceId });
+  }
+
   appStatus(): Promise<any> {
     return this.call('app status');
   }
@@ -221,4 +231,11 @@ export function formatApprovalDetail(approval: any): string {
 
 export function formatRunLine(run: any): string {
   return `${run.runId}  ${run.mode ?? '?'}  ${run.status ?? '?'}${run.approvalId ? `  approval ${run.approvalId}` : ''}${run.summary ? `  ${run.summary}` : ''}`;
+}
+
+export function formatServiceLine(service: any): string {
+  const ended = service.state === 'exited' || service.state === 'failed';
+  return `${service.serviceId}  ${service.state}  ${service.name}  ${service.url}  pid ${service.pid ?? '-'}`
+    + (ended ? `  exit ${service.exitCode ?? service.signal}` : '')
+    + (service.error ? `  ${service.error}` : '');
 }

@@ -5,6 +5,7 @@ import { getTool } from '../tools/registry.js';
 import { DEFAULT_POLICY_BUDGETS, type PolicyBudgets } from './budgets.js';
 import { resolveInsideAnyRoot } from './sandbox.js';
 import { isSensitivePath } from './sensitive-paths.js';
+import { isDemoProfileEnabled } from '../runtime/demo-profile.js';
 
 export type PolicyDecision =
   | { decision: 'allow' }
@@ -61,6 +62,12 @@ export async function evaluateActionPolicy(input: EvaluateActionPolicyInput): Pr
   }
 
   const profileName = input.session?.permissionProfile ?? input.globalProfile ?? 'read-only';
+  // Fail closed: 'demo-review' only ever comes from an approved review, but if
+  // the demo switch is not on right now (a process can be started with it, the
+  // env can change, or a stale record thinks it is on), deny.
+  if (profileName === 'demo-review' && !isDemoProfileEnabled()) {
+    return { decision: 'deny', reason: 'The demo profile is off (CONDUIT_DEMO_PROFILE is not 1).' };
+  }
   const profile = PROFILES[profileName];
   const tool = getTool(input.action.tool);
   if (!tool) {

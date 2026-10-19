@@ -64,6 +64,8 @@ describe('CLI / API parity for pause and approvals (S1/S2)', () => {
     await client.updateSettings({ returnApprovesShellWithoutDetails: true });
     await client.listRuns();
     await client.runResult('run_1');
+    await client.listServices();
+    await client.stopService('svc_1');
     await client.appStatus();
     await client.diagnostics();
     await client.agentHandshake({ label: 'L' });
@@ -71,15 +73,15 @@ describe('CLI / API parity for pause and approvals (S1/S2)', () => {
 
     const expected = Object.values(CONTROL_CLI_ROUTES).map((route) => ({
       method: route.method,
-      path: route.path.replace(':id', route.path.includes('/sessions/') ? 'sess_1' : route.path.includes('/runs/') ? 'run_1' : 'approval_1')
+      path: route.path.replace(':id', route.path.includes('/sessions/') ? 'sess_1' : route.path.includes('/runs/') ? 'run_1' : route.path.includes('/services/') ? 'svc_1' : 'approval_1')
     }));
     expect(calls.map(({ method, path: callPath }) => ({ method, path: callPath }))).toEqual(expected);
     expect(calls[1].body).toEqual({ by: 'cli', reason: 'r' });
     expect(calls[8].body).toEqual({ decidedBy: 'cli', reason: 'ok' });
     expect(calls[9].body).toEqual({ decidedBy: 'cli' });
     expect(calls[11].body).toEqual({ returnApprovesShellWithoutDetails: true });
-    expect(calls[16].body).toEqual({ label: 'L', copy: false });
-    expect(calls[17].body).toEqual({ url: 'conduit://run?payload=x' });
+    expect(calls[18].body).toEqual({ label: 'L', copy: false });
+    expect(calls[19].body).toEqual({ url: 'conduit://run?payload=x' });
 
     // "Allow for this chat" is the same approve call with remember: 'session'.
     await client.decideApproval('approval_1', 'approve', undefined, { forThisChat: true });

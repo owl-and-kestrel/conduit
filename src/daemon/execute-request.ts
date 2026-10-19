@@ -12,6 +12,7 @@ import { checkExecutionGate } from '../state/pause-state.js';
 import { ensureRunDir, writeTextFile } from '../state/logs.js';
 import { createRunId } from '../util/ids.js';
 import { executeActions } from '../runtime/execute-actions.js';
+import { isDemoProfileEnabled } from '../runtime/demo-profile.js';
 
 export type ExecuteRequestStatus = 'executed' | 'ignored' | 'rejected' | 'requires_review';
 
@@ -236,7 +237,10 @@ export async function executeApprovedReview(
     approvalId: approval.approvalId,
     projectRoot,
     mode: 'approved-review',
-    startedAt: new Date().toISOString()
+    startedAt: new Date().toISOString(),
+    // Demo profile only. Off, the file is exactly what it is today (no
+    // `profile` key).
+    ...(isDemoProfileEnabled() ? { profile: 'demo-review' } : {})
   }, null, 2)}\n`);
 
   const results = await executeActions({
@@ -314,6 +318,11 @@ async function createUntrustedRequestReview(request: ActionRequestBlock, policyR
       `Permissions: ${JSON.stringify(request.permissions ?? [])}`,
       `Actions: ${request.actions.map((action) => `${action.id}:${action.tool}`).join(', ') || '(none)'}`,
       '',
+      // Demo profile only: warn the person that this approval lets actions run
+      // programs. Off, the prompt array is exactly what it is today.
+      ...(isDemoProfileEnabled()
+        ? ['Demo profile is on: approving lets these actions run programs on this computer.']
+        : []),
       'Approve only if you trust the source and intended local effects.'
     ].join('\n')
   });
@@ -326,7 +335,9 @@ function createApprovedReviewPolicySession(projectRoot: string, approvalId: stri
     createdAt: new Date().toISOString(),
     state: 'active',
     transport: 'clipboard',
-    permissionProfile: 'read-only',
+    // Demo profile only: the approved review may run programs. Off, this is
+    // and stays 'read-only'.
+    permissionProfile: isDemoProfileEnabled() ? 'demo-review' : 'read-only',
     allowedRoots: [projectRoot],
     currentNonce: `approved_${approvalId}`,
     usedNonces: []

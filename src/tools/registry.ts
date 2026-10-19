@@ -8,6 +8,8 @@ import { shellRunTool } from './shell-run.js';
 import { conduitAboutTool } from './conduit-about.js';
 import { conduitHelpTool } from './conduit-help.js';
 import { conduitExtensionPrepareAlphaInstallTool } from './conduit-extension.js';
+import { serviceStartTool } from './service-start.js';
+import { isDemoProfileEnabled } from '../runtime/demo-profile.js';
 import type { ToolDefinition } from './types.js';
 
 const TOOLS = [
@@ -24,9 +26,13 @@ const TOOLS = [
 ] satisfies ToolDefinition[];
 
 export function getTool(name: string): ToolDefinition | null {
-  return TOOLS.find((tool) => tool.name === name) ?? null;
+  // service.start is registered only while the demo profile is on. With the
+  // switch off both getTool and listTools return exactly what they returned
+  // before (same order, same contents); with it on serviceStartTool is last.
+  const tools = isDemoProfileEnabled() ? [...TOOLS, serviceStartTool] : TOOLS;
+  return tools.find((tool) => tool.name === name) ?? null;
 }
 
 export function listTools(): ToolDefinition[] {
-  return [...TOOLS];
+  return isDemoProfileEnabled() ? [...TOOLS, serviceStartTool] : [...TOOLS];
 }

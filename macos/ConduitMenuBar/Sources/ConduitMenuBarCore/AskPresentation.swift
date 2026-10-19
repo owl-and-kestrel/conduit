@@ -91,7 +91,43 @@ public enum AskPresentation {
 
     /// "approved · you · menubar", "expired · timeout", for recent activity.
     public static func decisionLine(for approval: ApprovalSummary) -> String {
-        var parts = [approval.status]
+        let detail = decisionDetail(for: approval)
+        return detail.isEmpty ? approval.status : approval.status + " · " + detail
+    }
+
+    /// The status of a recent decision, for the small badge in the popover's
+    /// "Recent decisions" list (spec §3.2).
+    public enum DecisionBadge: Equatable {
+        case approved
+        case denied
+        case expired
+        case other(String)
+
+        /// The badge text: the known statuses as-is, otherwise the raw status.
+        public var label: String {
+            switch self {
+            case .approved: return "approved"
+            case .denied: return "denied"
+            case .expired: return "expired"
+            case .other(let status): return status
+            }
+        }
+    }
+
+    public static func decisionBadge(for approval: ApprovalSummary) -> DecisionBadge {
+        switch approval.status {
+        case "approved": return .approved
+        case "denied": return .denied
+        case "expired": return .expired
+        default: return .other(approval.status)
+        }
+    }
+
+    /// What `decisionLine` says without the leading status: who decided and
+    /// how it went ("you · notification", "failed"), joined by " · ". Empty
+    /// when neither is known.
+    public static func decisionDetail(for approval: ApprovalSummary) -> String {
+        var parts: [String] = []
         if let by = approval.decidedBy {
             switch by {
             case "menubar": parts.append("you · menu bar")

@@ -132,4 +132,18 @@ final class AllowOnceTests: XCTestCase {
             "approved · you · notification"
         )
     }
+
+    func testDecisionBadgeAndDetail() {
+        XCTAssertEqual(AskPresentation.decisionBadge(for: Fixtures.approval(status: "approved")), .approved)
+        XCTAssertEqual(AskPresentation.decisionBadge(for: Fixtures.approval(status: "denied")), .denied)
+        XCTAssertEqual(AskPresentation.decisionBadge(for: Fixtures.approval(status: "expired")), .expired)
+        let weird = AskPresentation.decisionBadge(for: Fixtures.approval(status: "weird"))
+        XCTAssertEqual(weird, .other("weird"))
+        XCTAssertEqual(weird.label, "weird")
+        XCTAssertEqual(
+            AskPresentation.decisionDetail(for: Fixtures.approval(status: "approved", decidedBy: "notification")),
+            "you · notification"
+        )
+        XCTAssertEqual(AskPresentation.decisionDetail(for: Fixtures.approval(status: "denied")), "")
+    }
 }

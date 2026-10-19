@@ -24,7 +24,8 @@ struct PopoverView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 8) {
-                Image(systemName: headerSymbol)
+                Image(nsImage: ConduitIcon.glyph(for: model.state.kind))
+                    .renderingMode(.template)
                     .foregroundStyle(headerColor)
                 Text(model.state.headline)
                     .font(.headline)
@@ -108,7 +109,7 @@ struct PopoverView: View {
                     }
                 }
                 .frame(maxHeight: 340)
-                Text("↑↓ select · Space details · Return allow once · ⌘Return allow for this chat · ⌘⌫ deny · Esc close")
+                Text("↑↓ select · Esc close · hover a button for its key")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -122,11 +123,12 @@ struct PopoverView: View {
                     .foregroundStyle(.secondary)
                 ForEach(model.state.recentDecisions) { decided in
                     HStack(alignment: .firstTextBaseline) {
+                        DecisionBadgeView(badge: AskPresentation.decisionBadge(for: decided))
                         Text(AskPresentation.title(for: decided))
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Spacer()
-                        Text(AskPresentation.decisionLine(for: decided))
+                        Text(AskPresentation.decisionDetail(for: decided))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
@@ -145,18 +147,34 @@ struct PopoverView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Button("Copy Agent Handshake") { model.actions?.copyHandshake() }
+                .buttonStyle(.bordered)
             Spacer()
             if !isStopped && !model.confirmingStopAll {
-                Button("Stop all…") { model.confirmingStopAll = true }
+                Button("Stop all…", role: .destructive) { model.confirmingStopAll = true }
+                    .foregroundStyle(.red)
                     .disabled(model.busy)
             }
-            Button("Settings…") { model.actions?.openSettings() }
-            Button("Quit") { model.actions?.quit() }
+            Button {
+                model.actions?.openSettings()
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.borderless)
+            .help("Settings… (⌘,)")
+            .accessibilityLabel("Settings…")
+            Button {
+                model.actions?.quit()
+            } label: {
+                Image(systemName: "power")
+            }
+            .buttonStyle(.borderless)
+            .help("Quit Conduit")
+            .accessibilityLabel("Quit")
         }
+        .controlSize(.small)
         .buttonStyle(.borderless)
-        .font(.callout)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
@@ -165,21 +183,34 @@ struct PopoverView: View {
         model.state.stopped
     }
 
-    private var headerSymbol: String {
-        switch model.state.kind {
-        case .idle: return "checkmark.circle"
-        case .running: return "arrow.triangle.2.circlepath"
-        case .needsYou: return "hand.raised"
-        case .paused: return "pause.circle"
-        case .error: return "exclamationmark.triangle"
-        }
-    }
-
     private var headerColor: Color {
         switch model.state.kind {
         case .needsYou: return .accentColor
         case .error: return .orange
         default: return .secondary
+        }
+    }
+}
+
+/// The small capsule badge for a recent decision, colored by the outcome.
+private struct DecisionBadgeView: View {
+    let badge: AskPresentation.DecisionBadge
+
+    var body: some View {
+        Text(badge.label)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(color.opacity(0.15)))
+            .foregroundStyle(color)
+    }
+
+    private var color: Color {
+        switch badge {
+        case .approved: return .green
+        case .denied: return .red
+        case .expired: return .orange
+        case .other: return .secondary
         }
     }
 }
@@ -265,19 +296,25 @@ private struct AskRow: View {
             }
             HStack(spacing: 8) {
                 Button(ask.isReview ? "Approve once" : "Allow once") { model.actions?.decide(ask.approvalId, .approve) }
+                    .buttonStyle(.borderedProminent)
                     .disabled(deciding)
+                    .help(ask.isReview ? "Run this one request read-only (Return)" : "Allow this one request (Return; a shell command shows its details first)")
                 if AllowForThisChat.isOffered(for: ask) {
                     Button("Allow for this chat") { model.actions?.decideForThisChat(ask.approvalId) }
+                        .buttonStyle(.bordered)
                         .disabled(deciding)
-                        .help("Also allow this exact \(ask.action.tool == "shell.run" ? "command" : "file write") again in this chat, until the chat is revoked or Conduit restarts.")
+                        .help("Also allow this exact \(ask.action.tool == "shell.run" ? "command" : "file write") again in this chat, until the chat is revoked or Conduit restarts. (⌘Return)")
                 }
                 Button("Deny") { model.actions?.decide(ask.approvalId, .deny) }
+                    .buttonStyle(.bordered)
                     .disabled(deciding)
+                    .help("Deny (⌘⌫)")
                 Spacer()
                 Button(expanded ? "Hide details" : "Details") {
                     if expanded { model.expanded.remove(ask.approvalId) } else { model.expanded.insert(ask.approvalId) }
                 }
                 .buttonStyle(.borderless)
+                .help("Show or hide details (Space)")
                 Button("Open in panel") { model.actions?.openDetails(ask.approvalId) }
                     .buttonStyle(.borderless)
                 if deciding { ProgressView().controlSize(.small) }

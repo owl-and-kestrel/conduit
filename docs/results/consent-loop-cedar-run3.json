@@ -1,0 +1,243 @@
+{
+  "schema": "conduit.demo.consent-loop.v1",
+  "thesis": "Conduit does not make local execution safe. It makes local execution legible.",
+  "startedAt": "2026-10-19T00:20:01.589Z",
+  "finishedAt": "2026-10-19T00:20:27.095Z",
+  "node": "v22.23.2",
+  "platform": "linux-arm64",
+  "cli": "tsx src/cli/index.ts",
+  "arms": [
+    {
+      "arm": "trusted",
+      "daemonMs": 1232,
+      "armMs": 6693,
+      "events": {
+        "accepted": 1,
+        "executed": 1,
+        "rejected": 0,
+        "requiresReview": 0,
+        "error": 0
+      },
+      "approvalIdPresent": false,
+      "runsCreated": 1,
+      "newAsks": 0,
+      "pendingAsks": 0,
+      "pendingTools": [],
+      "clipboardAfterPreview": "Conduit results:\n\n<<<CONDUIT_RESULTS_JSON\n{\n  \"type\": \"conduit.results.v1\",\n  \"runId\": \"<redacted>\",\n  \"sessionId\": \"<redacted>\",\n  \"nextNonce\": \"<redacted>\",\n  \"results\": [\n    {\n      \"id\": \"file_list_39d8ca90\",\n      \"tool\": \"file.list\",\n      \"status\": \"ok\",\n      \"content\": [\n        {\n          \"path\": \"README.md\",\n          \"type\": \"file\"\n      "
+    },
+    {
+      "arm": "untrusted (nonce missing)",
+      "daemonMs": 994,
+      "armMs": 6341,
+      "events": {
+        "accepted": 0,
+        "executed": 0,
+        "rejected": 0,
+        "requiresReview": 1,
+        "error": 0
+      },
+      "approvalIdPresent": true,
+      "runsCreated": 0,
+      "newAsks": 1,
+      "pendingAsks": 1,
+      "pendingTools": [
+        "conduit.review"
+      ],
+      "clipboardAfterPreview": "Conduit review required.\n\nThis exact Conduit envelope is not attached to a trusted live session, so it was not executed.\nOpen Conduit Control -> Approvals to inspect the requested source, permissions, actions, and reasons.\n\nApproval ID: <redacted>\nActions: file_list_39d8ca90:file.list\n\nApproving this review does not broaden future permissions. It is a one-request consent decis",
+      "denyStatus": "denied",
+      "denyMs": 1086,
+      "runsCreatedAfterDeny": 0
+    },
+    {
+      "arm": "replay (consumed nonce)",
+      "daemonMs": 1092,
+      "armMs": 6278,
+      "events": {
+        "accepted": 0,
+        "executed": 0,
+        "rejected": 1,
+        "requiresReview": 0,
+        "error": 0
+      },
+      "approvalIdPresent": false,
+      "runsCreated": 0,
+      "newAsks": 0,
+      "pendingAsks": 0,
+      "pendingTools": [],
+      "clipboardAfterPreview": "Conduit request repair:\n\n<<<CONDUIT_REPAIR_JSON\n{\n  \"type\": \"conduit.repair.v1\",\n  \"status\": \"rejected\",\n  \"reason\": \"Nonce was already used.\",\n  \"code\": \"invalid_session\",\n  \"sessionId\": \"<redacted>\",\n  \"expected\": {\n    \"exactEnvelope\": true,\n    \"schema\": \"conduit.request.v1\",\n    \"requiredFields\": [\n      \"schema or v: \\\"1\\\"\",\n      \"source\",\n      \"permissions\",\n      \"sessio"
+    }
+  ],
+  "checks": [
+    {
+      "arm": "trusted",
+      "check": "events.executed",
+      "expected": 1,
+      "actual": 1,
+      "pass": true
+    },
+    {
+      "arm": "trusted",
+      "check": "events.requiresReview",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "trusted",
+      "check": "events.rejected",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "trusted",
+      "check": "newAsks",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "trusted",
+      "check": "pendingAsks",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "trusted",
+      "check": "runsCreated",
+      "expected": 1,
+      "actual": 1,
+      "pass": true
+    },
+    {
+      "arm": "trusted",
+      "check": "clipboardListsReadme",
+      "expected": "contains README.md",
+      "actual": true,
+      "pass": true
+    },
+    {
+      "arm": "untrusted (nonce missing)",
+      "check": "events.executed",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "untrusted (nonce missing)",
+      "check": "events.requiresReview",
+      "expected": 1,
+      "actual": 1,
+      "pass": true
+    },
+    {
+      "arm": "untrusted (nonce missing)",
+      "check": "events.rejected",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "untrusted (nonce missing)",
+      "check": "newAsks",
+      "expected": 1,
+      "actual": 1,
+      "pass": true
+    },
+    {
+      "arm": "untrusted (nonce missing)",
+      "check": "pendingAsks",
+      "expected": 1,
+      "actual": 1,
+      "pass": true
+    },
+    {
+      "arm": "untrusted (nonce missing)",
+      "check": "pendingTools",
+      "expected": "conduit.review",
+      "actual": "conduit.review",
+      "pass": true
+    },
+    {
+      "arm": "untrusted (nonce missing)",
+      "check": "runsCreated",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "untrusted (nonce missing)",
+      "check": "denyStatus",
+      "expected": "denied",
+      "actual": "denied",
+      "pass": true
+    },
+    {
+      "arm": "untrusted (nonce missing)",
+      "check": "pendingAfterDeny",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "untrusted (nonce missing)",
+      "check": "runsCreatedAfterDeny",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "replay (consumed nonce)",
+      "check": "events.executed",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "replay (consumed nonce)",
+      "check": "events.requiresReview",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "replay (consumed nonce)",
+      "check": "events.rejected",
+      "expected": 1,
+      "actual": 1,
+      "pass": true
+    },
+    {
+      "arm": "replay (consumed nonce)",
+      "check": "newAsks",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "replay (consumed nonce)",
+      "check": "pendingAsks",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "arm": "replay (consumed nonce)",
+      "check": "runsCreated",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    }
+  ],
+  "pass": true,
+  "totals": {
+    "asksTrusted": 0,
+    "asksUntrusted": 1,
+    "executions": 1,
+    "reviews": 1,
+    "rejections": 1,
+    "runsCreated": 1,
+    "approvalsDenied": 1
+  }
+}

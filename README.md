@@ -198,6 +198,13 @@ Compact shortcuts (`read`, `list`, `diff`, `status`, `write`, `patch`,
 `why`), the agent handshake and the extension loop are documented in
 [docs/agent-loop.md](docs/agent-loop.md).
 
+**See it.** `npm run demo:consent` runs the consent loop end to end on the real
+CLI, in an isolated temp state dir with a file-backed clipboard. A trusted,
+nonced envelope runs with zero asks. The same envelope without its nonce
+becomes exactly one review ask, which the demo denies, and nothing runs. A
+replayed nonce is refused. Results:
+[docs/results/consent-loop-demo.md](docs/results/consent-loop-demo.md).
+
 ## Health and logs
 
 ```sh

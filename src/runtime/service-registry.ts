@@ -47,13 +47,31 @@ export interface ServiceRecord {
   signal?: string | null;
   stoppedBy?: 'person' | 'ready-deadline';
   error?: string;
+  // Present only for the package form: the PACKAGE digest, the URL it was
+  // fetched from, and whether it came from an already-cached run.
+  package?: {
+    sha256: string;
+    url: string;
+    cached: boolean;
+    bytesFetched: number;
+  };
 }
 
 export interface StartServiceInput {
   name: string;
-  path: string;
+  /** Project entry script; set for the project-path form. */
+  path?: string;
   args?: string[];
   sha256?: string;
+  /** Package form: a verified package already in the content-addressed cache. */
+  fromPackage?: {
+    dir: string;
+    entry: string;
+    sha256: string;
+    url: string;
+    cached: boolean;
+    bytesFetched: number;
+  };
   port?: number;
   lan?: boolean;
   readySeconds?: number;
@@ -105,19 +123,43 @@ export class ServiceRegistry {
   private children = new Map<string, ChildProcess>();
 
   async start(input: StartServiceInput): Promise<ServiceRecord> {
-    // Sandbox: the entry must be inside the project root, like every file tool
-    // path (resolveInsideProject throws "outside project root", which the tool
-    // layer reports as denied). It must also be a regular file.
-    const entry = await resolveInsideProject(input.path, input.projectRoot);
-    const entryStat = await stat(entry);
-    if (!entryStat.isFile()) {
-      throw new Error(`Service entry is not a file: ${input.path}`);
+    // Exactly one of the two forms starts a service.
+    if ((input.path !== undefined) === (input.fromPackage !== undefined)) {
+      throw new Error('Start a service with exactly one of path (project entry) or fromPackage (cached package).');
     }
 
-    // Hash before spawning anything, so a wrong digest never starts a program.
-    const sha256 = createHash('sha256').update(await readFile(entry)).digest('hex');
-    if (input.sha256 !== undefined && input.sha256 !== sha256) {
-      throw new Error(`Service entry sha256 mismatch: expected ${input.sha256}, got ${sha256}`);
+    let entry: string;
+    let cwd: string;
+    let sha256: string;
+    if (input.fromPackage) {
+      // Package form: the bytes were verified by sha256 at unpack time and the
+      // directory is read-only in Conduit's own cache, so do NOT hash or
+      // resolve anything in the project here. This closes S1 review F-02: the
+      // spawned bytes are the bytes verified at unpack, in Conduit's read-only
+      // cache dir, not a project file that can change between hash and spawn.
+      entry = input.fromPackage.entry;
+      cwd = input.fromPackage.dir;
+      sha256 = input.fromPackage.sha256;
+    } else {
+      // Project-path form. Sandbox: the entry must be inside the project root,
+      // like every file tool path (resolveInsideProject throws "outside project
+      // root", which the tool layer reports as denied). It must also be a
+      // regular file.
+      // F-02 residual: a writer with write access to the project root can
+      // still swap this file between hash and spawn (TOCTOU). Use the package
+      // form for bytes that cannot change between check and spawn.
+      entry = await resolveInsideProject(input.path as string, input.projectRoot);
+      const entryStat = await stat(entry);
+      if (!entryStat.isFile()) {
+        throw new Error(`Service entry is not a file: ${input.path}`);
+      }
+
+      // Hash before spawning anything, so a wrong digest never starts a program.
+      sha256 = createHash('sha256').update(await readFile(entry)).digest('hex');
+      if (input.sha256 !== undefined && input.sha256 !== sha256) {
+        throw new Error(`Service entry sha256 mismatch: expected ${input.sha256}, got ${sha256}`);
+      }
+      cwd = input.projectRoot;
     }
 
     // Port: pick or probe on loopback only. Conduit never binds 0.0.0.0 for
@@ -146,7 +188,7 @@ export class ServiceRegistry {
     const childSpawnOptions = supervision.childSpawnOptions();
     const ownGroup = childSpawnOptions.detached;
     const child = spawn(process.execPath, [entry, ...(input.args ?? [])], {
-      cwd: input.projectRoot,
+      cwd,
       env: buildServiceEnv(process.env, { port, lan: input.lan ?? false, serviceId }),
       stdio: ['ignore', 'pipe', 'pipe'],
       ...childSpawnOptions
@@ -173,7 +215,18 @@ export class ServiceRegistry {
       pid: child.pid ?? null,
       ownGroup,
       state: 'starting',
-      startedAt
+      startedAt,
+      // Package form only: provenance of the digest that was verified at unpack.
+      ...(input.fromPackage
+        ? {
+            package: {
+              sha256: input.fromPackage.sha256,
+              url: input.fromPackage.url,
+              cached: input.fromPackage.cached,
+              bytesFetched: input.fromPackage.bytesFetched
+            }
+          }
+        : {})
     };
     this.records.set(serviceId, record);
     this.children.set(serviceId, child);

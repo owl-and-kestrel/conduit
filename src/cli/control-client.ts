@@ -25,6 +25,8 @@ export const CONTROL_CLI_ROUTES = {
   'runs result': { method: 'GET', path: '/api/runs/:id/result' },
   'services list': { method: 'GET', path: '/api/services' },
   'services stop': { method: 'POST', path: '/api/services/:id/stop' },
+  'packages allowed': { method: 'GET', path: '/api/package-allows' },
+  'packages revoke': { method: 'POST', path: '/api/package-allows/:id/revoke' },
   'app status': { method: 'GET', path: '/api/status' },
   diagnostics: { method: 'GET', path: '/api/diagnostics' },
   'session handshake': { method: 'POST', path: '/api/agent-handshake' },
@@ -100,12 +102,18 @@ export class ControlClient {
     return this.call('approvals show', { id: approvalId });
   }
 
-  /** `forThisChat` is "Allow for this chat": remembered for this session only. */
-  decideApproval(approvalId: string, decision: 'approve' | 'deny', reason?: string, options: { forThisChat?: boolean } = {}): Promise<any> {
+  /** `forThisChat` is "Allow for this chat": remembered for this session only.
+   * `alwaysAllowPackage` is demo profile only: "Always allow this exact
+   * package" (by sha256), revocable with `conduit packages revoke`. */
+  decideApproval(approvalId: string, decision: 'approve' | 'deny', reason?: string, options: { forThisChat?: boolean; alwaysAllowPackage?: boolean } = {}): Promise<any> {
     return this.call(decision === 'approve' ? 'approvals approve' : 'approvals deny', { id: approvalId }, {
       decidedBy: CLI_ACTOR,
       ...(reason ? { reason } : {}),
-      ...(options.forThisChat ? { remember: 'session' } : {})
+      ...(options.alwaysAllowPackage
+        ? { remember: 'package' }
+        : options.forThisChat
+          ? { remember: 'session' }
+          : {})
     });
   }
 
@@ -131,6 +139,16 @@ export class ControlClient {
 
   stopService(serviceId: string): Promise<any> {
     return this.call('services stop', { id: serviceId });
+  }
+
+  /** Demo profile only: lines up with GET /api/package-allows. */
+  listPackageAllows(): Promise<any> {
+    return this.call('packages allowed');
+  }
+
+  /** Demo profile only; `:id` is the sha256 of the package. */
+  revokePackageAllow(sha256: string): Promise<any> {
+    return this.call('packages revoke', { id: sha256 }, { by: CLI_ACTOR });
   }
 
   appStatus(): Promise<any> {
@@ -238,4 +256,12 @@ export function formatServiceLine(service: any): string {
   return `${service.serviceId}  ${service.state}  ${service.name}  ${service.url}  pid ${service.pid ?? '-'}`
     + (ended ? `  exit ${service.exitCode ?? service.signal}` : '')
     + (service.error ? `  ${service.error}` : '');
+}
+
+export function formatPackageAllowLine(allow: any): string {
+  const revoked = allow.state === 'revoked';
+  const life = revoked
+    ? `  revoked ${allow.revokedAt ?? ''} by ${allow.revokedBy ?? ''}`
+    : '';
+  return `${allow.sha256}  ${allow.state}  ${allow.url ?? ''}  allowed ${allow.allowedAt}${allow.title ? `  ${allow.title}` : ''}${life}`;
 }

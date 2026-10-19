@@ -26,6 +26,7 @@ import {
   formatApprovalDetail,
   formatApprovalLine,
   formatControlStatus,
+  formatPackageAllowLine,
   formatRunLine,
   formatServiceLine
 } from './control-client.js';
@@ -310,13 +311,17 @@ for (const decision of ['approve', 'deny'] as const) {
     .option('--reason <text>', 'decision reason recorded on the approval');
   if (decision === 'approve') {
     command.option('--for-this-chat', 'Allow for this chat: the same exact shell command or file write in this chat runs without asking again. Ends when the chat is revoked or Conduit restarts.', false);
+    command.option('--always-allow-package', 'Demo profile only: always allow this exact package (by sha256); revoke with `conduit packages revoke`.', false);
   }
   command
     .option('--url <url>', 'Conduit Control URL')
     .option('--json', 'print the raw API response', false)
-    .action(async (approvalId: string, options: { reason?: string; forThisChat?: boolean; url?: string; json: boolean }) => {
+    .action(async (approvalId: string, options: { reason?: string; forThisChat?: boolean; alwaysAllowPackage?: boolean; url?: string; json: boolean }) => {
       const result = await new ControlClient({ url: options.url })
-        .decideApproval(approvalId, decision, options.reason, { forThisChat: options.forThisChat === true });
+        .decideApproval(approvalId, decision, options.reason, {
+          forThisChat: options.forThisChat === true,
+          alwaysAllowPackage: options.alwaysAllowPackage === true
+        });
       if (options.json) {
         console.log(JSON.stringify(result, null, 2));
         return;
@@ -443,6 +448,60 @@ servicesCommand.command('stop')
     } catch (error) {
       if (reportDemoServicesError(error)) {
         console.error('Conduit Control is not running with the demo profile (CONDUIT_DEMO_PROFILE=1), so it has no services.');
+        process.exitCode = 1;
+        return;
+      }
+      throw error;
+    }
+  });
+
+const packagesCommand = program.command('packages')
+  .description('Demo profile only: list or revoke "Always allow this exact package" grants (same API as the panel and menu bar).');
+
+// A 404 "Not found" from either packages verb means Control is running without
+// the demo switch; reportDemoServicesError says so plainly, as for services.
+
+packagesCommand.command('allowed')
+  .description('List packages always allowed by sha256, newest first ("Always allow this exact package").')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--json', 'print the raw API response', false)
+  .action(async (options: { url?: string; json: boolean }) => {
+    try {
+      const result = await new ControlClient({ url: options.url }).listPackageAllows();
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      const allows = result.allows as any[];
+      console.log(allows.length === 0 ? 'No allowed packages.' : allows.map(formatPackageAllowLine).join('\n'));
+    } catch (error) {
+      if (reportDemoServicesError(error)) {
+        console.error('Conduit Control is not running with the demo profile (CONDUIT_DEMO_PROFILE=1), so it has no package allows.');
+        process.exitCode = 1;
+        return;
+      }
+      throw error;
+    }
+  });
+
+packagesCommand.command('revoke')
+  .description('Revoke a package allow by its sha256; the next start of that package asks again.')
+  .argument('<sha256>', 'the package sha256 (64 lowercase hex digits)')
+  .option('--url <url>', 'Conduit Control URL')
+  .option('--json', 'print the raw API response', false)
+  .action(async (sha256: string, options: { url?: string; json: boolean }) => {
+    try {
+      const result = await new ControlClient({ url: options.url }).revokePackageAllow(sha256);
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      for (const allow of result.allows as any[]) {
+        console.log(formatPackageAllowLine(allow));
+      }
+    } catch (error) {
+      if (reportDemoServicesError(error)) {
+        console.error('Conduit Control is not running with the demo profile (CONDUIT_DEMO_PROFILE=1), so it has no package allows.');
         process.exitCode = 1;
         return;
       }

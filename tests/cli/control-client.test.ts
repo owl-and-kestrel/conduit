@@ -64,8 +64,11 @@ describe('CLI / API parity for pause and approvals (S1/S2)', () => {
     await client.updateSettings({ returnApprovesShellWithoutDetails: true });
     await client.listRuns();
     await client.runResult('run_1');
+    const digest = 'a'.repeat(64);
     await client.listServices();
     await client.stopService('svc_1');
+    await client.listPackageAllows();
+    await client.revokePackageAllow(digest);
     await client.appStatus();
     await client.diagnostics();
     await client.agentHandshake({ label: 'L' });
@@ -73,19 +76,30 @@ describe('CLI / API parity for pause and approvals (S1/S2)', () => {
 
     const expected = Object.values(CONTROL_CLI_ROUTES).map((route) => ({
       method: route.method,
-      path: route.path.replace(':id', route.path.includes('/sessions/') ? 'sess_1' : route.path.includes('/runs/') ? 'run_1' : route.path.includes('/services/') ? 'svc_1' : 'approval_1')
+      // :id on the package-allows route is a sha256, not an approval id.
+      path: route.path.replace(':id', route.path.includes('/sessions/') ? 'sess_1' : route.path.includes('/runs/') ? 'run_1' : route.path.includes('/services/') ? 'svc_1' : route.path.includes('/package-allows/') ? digest : 'approval_1')
     }));
     expect(calls.map(({ method, path: callPath }) => ({ method, path: callPath }))).toEqual(expected);
     expect(calls[1].body).toEqual({ by: 'cli', reason: 'r' });
     expect(calls[8].body).toEqual({ decidedBy: 'cli', reason: 'ok' });
     expect(calls[9].body).toEqual({ decidedBy: 'cli' });
     expect(calls[11].body).toEqual({ returnApprovesShellWithoutDetails: true });
-    expect(calls[18].body).toEqual({ label: 'L', copy: false });
-    expect(calls[19].body).toEqual({ url: 'conduit://run?payload=x' });
+    expect(calls[20].body).toEqual({ label: 'L', copy: false });
+    expect(calls[21].body).toEqual({ url: 'conduit://run?payload=x' });
 
     // "Allow for this chat" is the same approve call with remember: 'session'.
     await client.decideApproval('approval_1', 'approve', undefined, { forThisChat: true });
     expect(calls.at(-1)).toEqual({ method: 'POST', path: '/api/approvals/approval_1/approve', body: { decidedBy: 'cli', remember: 'session' } });
+
+    // "Always allow this exact package" (demo profile only) is the same approve
+    // call with remember: 'package'.
+    await client.decideApproval('approval_1', 'approve', undefined, { alwaysAllowPackage: true });
+    expect(calls.at(-1)).toEqual({ method: 'POST', path: '/api/approvals/approval_1/approve', body: { decidedBy: 'cli', remember: 'package' } });
+
+    await client.listPackageAllows();
+    await client.revokePackageAllow(digest);
+    expect(calls.at(-2)).toEqual({ method: 'GET', path: '/api/package-allows' });
+    expect(calls.at(-1)).toEqual({ method: 'POST', path: `/api/package-allows/${digest}/revoke`, body: { by: 'cli' } });
   });
 
   it('gets the same answers as the API and records CLI decisions as cli', async () => {

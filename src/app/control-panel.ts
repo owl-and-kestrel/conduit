@@ -18,6 +18,13 @@ import {
   type ApprovalRecord
 } from '../approvals/approval-store.js';
 import { isRememberableAction, REMEMBER_FOR_THIS_CHAT } from '../approvals/session-grants.js';
+import {
+  addPackageAllows,
+  listPackageAllows,
+  packageOnlyDigests,
+  REMEMBER_THIS_PACKAGE,
+  revokePackageAllow
+} from '../approvals/package-allows.js';
 import { executeApprovedReview, executeRequestFromUnknown } from '../daemon/execute-request.js';
 import { createDiagnosticBundle } from '../diagnostics/diagnostic-bundle.js';
 import { getPauseState } from '../state/pause-state.js';
@@ -129,7 +136,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           pause: true,
           settings: true,
           rememberForThisChat: true,
-          ...(isDemoProfileEnabled() ? { demoProfile: true, services: true } : {})
+          ...(isDemoProfileEnabled() ? { demoProfile: true, services: true, packageAllows: true } : {})
         }
       });
       return;
@@ -314,6 +321,42 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       return;
     }
 
+    // "Always allow this exact package" (demo profile only). Off: the same
+    // 404 as any unknown route.
+    if (req.method === 'GET' && url.pathname === '/api/package-allows') {
+      if (!isDemoProfileEnabled()) {
+        sendJson(res, 404, { error: 'Not found' });
+        return;
+      }
+      sendJson(res, 200, { allows: await listPackageAllows() });
+      return;
+    }
+
+    const packageRevokeMatch = url.pathname.match(/^\/api\/package-allows\/([^/]+)\/revoke$/);
+    if (req.method === 'POST' && packageRevokeMatch?.[1]) {
+      if (!isDemoProfileEnabled()) {
+        sendJson(res, 404, { error: 'Not found' });
+        return;
+      }
+      // :id is the sha256 of the package the allow is keyed by.
+      const sha256 = decodePathSegment(packageRevokeMatch[1]);
+      if (sha256 === null || !/^[0-9a-f]{64}$/.test(sha256)) {
+        // A malformed percent escape or a non-digest is a bad request, not a
+        // server fault; and it can never name a real allow.
+        sendJson(res, 400, { error: 'Invalid package digest.' });
+        return;
+      }
+      const body = await readJsonBody(req) as { by?: unknown };
+      const by = isApprovalDecider(body.by) ? body.by : 'control-app';
+      const revoked = await revokePackageAllow(sha256, by);
+      if (revoked.length === 0) {
+        sendJson(res, 404, { error: 'No active allow for this package.' });
+        return;
+      }
+      sendJson(res, 200, { allows: revoked });
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/runs') {
       sendJson(res, 200, { runs: await listRuns() });
       return;
@@ -359,6 +402,9 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       // Refused up front, with nothing decided, unless the ask is a confirmation
       // from a live session for an action that can be remembered exactly. An
       // untrusted review can never be remembered: approve once creates no trust.
+      // Demo profile only (checked first): `remember: 'package'` chooses
+      // "Always allow this exact package" on an untrusted review; with the
+      // switch off it gets the same refusal as any other unknown remember.
       const remember = body.remember === undefined || body.remember === null ? undefined : body.remember;
       if (remember !== undefined) {
         const refusal = await rememberRefusal(remember, decision, before);
@@ -372,7 +418,9 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         decision,
         typeof body.reason === 'string' ? body.reason : undefined,
         decidedBy,
-        remember === undefined ? {} : { remember: REMEMBER_FOR_THIS_CHAT }
+        // "remember" on the approval record is only ever a chat-grant marker;
+        // package allows are their own records, not part of it.
+        remember === REMEMBER_FOR_THIS_CHAT ? { remember: REMEMBER_FOR_THIS_CHAT } : {}
       );
       if (approval.status !== decision) {
         // Already decided another way, or expired (timeout = deny). A late
@@ -386,6 +434,23 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         && !before.executionStatus
         && approval.action.tool === 'conduit.review'
       ) {
+        // "Always allow this exact package" (demo profile only): the person
+        // chose it with `remember: 'package'`, rememberRefusal checked the
+        // review is a package-only request, so record the allow BEFORE the
+        // review runs and report it in the response.
+        let packageAllows: Awaited<ReturnType<typeof addPackageAllows>> | undefined;
+        if (remember === REMEMBER_THIS_PACKAGE && isDemoProfileEnabled()) {
+          const digests = packageOnlyDigests(approval.action.args.actions as Array<Record<string, unknown>>);
+          if (digests) {
+            packageAllows = await addPackageAllows({
+              packages: digests.map((digest) => ({ sha256: digest.sha256, url: digest.url })),
+              approvalId: approval.approvalId,
+              decidedBy,
+              title: typeof approval.action.args.title === 'string' ? approval.action.args.title : null,
+              source: approval.action.args.source ?? null
+            });
+          }
+        }
         const running = await markApprovalExecutionRunning(approval.approvalId);
         try {
           const execution = await executeApprovedReview(running, { yes: true });
@@ -412,7 +477,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           const updated = execution.runId
             ? await markApprovalExecutionFinished(approval.approvalId, { status: 'ran', runId: execution.runId })
             : await markApprovalExecutionFinished(approval.approvalId, { status: 'failed', error: execution.reason ?? 'Execution did not produce a run.' });
-          sendJson(res, 200, { approval: updated, execution, copiedToClipboard, clipboardError });
+          sendJson(res, 200, { approval: updated, execution, ...(packageAllows ? { packageAllows } : {}), copiedToClipboard, clipboardError });
         } catch (error) {
           const updated = await markApprovalExecutionFinished(approval.approvalId, {
             status: 'failed',
@@ -485,6 +550,12 @@ async function rememberRefusal(
   decision: 'approved' | 'denied',
   approval: ApprovalRecord
 ): Promise<string | null> {
+  // "Always allow this exact package" (demo profile only). With the switch on
+  // it has its own refusals; with the switch off nothing changes below, so
+  // 'package' gets the same refusal as any other unknown remember value.
+  if (remember === REMEMBER_THIS_PACKAGE && isDemoProfileEnabled()) {
+    return packageRememberRefusal(decision, approval);
+  }
   if (remember !== REMEMBER_FOR_THIS_CHAT) return 'remember must be "session" (this chat only).';
   if (decision !== 'approved') return 'Only an approval can be remembered for this chat.';
   if (approval.status !== 'pending') return null; // the normal 409 path reports it
@@ -497,6 +568,21 @@ async function rememberRefusal(
   const session = approval.sessionId ? await getSession(approval.sessionId) : null;
   if (!session || session.state !== 'active') {
     return 'This request is not from a live chat, so it cannot be remembered. Allow it once instead.';
+  }
+  return null;
+}
+
+/** Refusals for `remember: 'package'`: an ask, decided as a package-only review. */
+function packageRememberRefusal(decision: 'approved' | 'denied', approval: ApprovalRecord): string | null {
+  if (decision !== 'approved') return 'Only an approval can always allow a package.';
+  if (approval.status !== 'pending') return null; // the normal 409 path reports it
+  if (approval.action.tool !== 'conduit.review') {
+    return 'Only an untrusted request review can always allow a package.';
+  }
+  const args = approval.action.args as Record<string, unknown>;
+  const actions = Array.isArray(args.actions) ? args.actions as Array<Record<string, unknown>> : [];
+  if (packageOnlyDigests(actions) === null) {
+    return 'Only a request whose every action starts a sha256-pinned package can be always allowed. Allow it once instead.';
   }
   return null;
 }

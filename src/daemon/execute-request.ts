@@ -13,6 +13,7 @@ import { ensureRunDir, writeTextFile } from '../state/logs.js';
 import { createRunId } from '../util/ids.js';
 import { executeActions } from '../runtime/execute-actions.js';
 import { isDemoProfileEnabled } from '../runtime/demo-profile.js';
+import { findActivePackageAllow, packageOnlyDigests } from '../approvals/package-allows.js';
 
 export type ExecuteRequestStatus = 'executed' | 'ignored' | 'rejected' | 'requires_review';
 
@@ -33,6 +34,9 @@ export interface ExecuteRequestOutput {
   rendered?: string;
   reason?: string;
   repair?: ConduitRepairEnvelope;
+  // Present when the request ran through "Always allow this exact package":
+  // the allow ids that were consulted (demo profile only).
+  allowIds?: string[];
 }
 
 export async function executeRequestFromText(input: ExecuteRequestInput): Promise<ExecuteRequestOutput> {
@@ -92,6 +96,12 @@ export async function executeConduitRequest(
   }
 
   if (!request.sessionId || !request.nonce) {
+    // "Always allow this exact package" (demo profile only): a request whose
+    // every action starts an allowed sha256 runs without an ask.
+    const allowed = await executeAllowedPackageRequest(request, options);
+    if (allowed) {
+      return allowed;
+    }
     const review = await createUntrustedRequestReview(request, 'Request is not attached to a trusted session.');
     return {
       status: 'requires_review',
@@ -103,6 +113,11 @@ export async function executeConduitRequest(
 
   const validation = await validateSessionNonce(request.sessionId, request.nonce);
   if (!validation.ok && validation.reason === 'Unknown session.') {
+    // Same check in both untrusted branches.
+    const allowed = await executeAllowedPackageRequest(request, options);
+    if (allowed) {
+      return allowed;
+    }
     const review = await createUntrustedRequestReview(request, validation.reason);
     return {
       status: 'requires_review',
@@ -274,6 +289,102 @@ export async function executeApprovedReview(
   };
 }
 
+/**
+ * "Always allow this exact package" (demo profile only): when EVERY action of
+ * an untrusted request starts a package whose sha256 the person has already
+ * allowed (an active record in the package-allow store), the request runs
+ * directly with no ask, exactly like an approved review apart from the
+ * metadata (`allowed-package`) and synthetic session id. Returns null — the
+ * normal untrusted-review path — when the demo switch is off, the actions are
+ * not all package starts, or any digest lacks an active allow (fail closed:
+ * one unallowed package makes the whole request ask).
+ */
+async function executeAllowedPackageRequest(
+  request: ActionRequestBlock,
+  options: Pick<ExecuteRequestInput, 'yes' | 'confirm'> = {}
+): Promise<ExecuteRequestOutput | null> {
+  if (!isDemoProfileEnabled()) {
+    return null;
+  }
+  const digests = packageOnlyDigests(request.actions);
+  if (!digests) {
+    return null;
+  }
+  const allowIds: string[] = [];
+  for (const { sha256 } of digests) {
+    const allow = await findActivePackageAllow(sha256);
+    if (!allow) {
+      return null;
+    }
+    allowIds.push(allow.allowId);
+  }
+
+  // Pause re-check: the gate at the top ran before the allow lookup. While
+  // paused nothing runs and no review is created, as at the top.
+  const gate = await checkExecutionGate();
+  if (!gate.ok) {
+    return pausedOutput(request, gate.reason);
+  }
+
+  const projectRoot = await resolveProjectRoot([process.cwd()]);
+  const runId = createRunId();
+  const runDir = getRunDir(runId);
+  // The same policy session an approved review gets; the id names the allow
+  // that stands in for the approval.
+  const policySession = {
+    ...createApprovedReviewPolicySession(projectRoot, allowIds[0]),
+    sessionId: `sess_allowed_${allowIds[0]}`
+  };
+
+  await ensureRunDir(runDir);
+  await writeTextFile(runDir, 'request.json', `${JSON.stringify({
+    type: 'allowed-package',
+    allowIds,
+    source: request.source ?? null,
+    permissions: request.permissions ?? [],
+    requestedCapabilities: request.requestedCapabilities ?? [],
+    actions: request.actions
+  }, null, 2)}\n`);
+  await writeTextFile(runDir, 'metadata.json', `${JSON.stringify({
+    runId,
+    allowIds,
+    projectRoot,
+    mode: 'allowed-package',
+    startedAt: new Date().toISOString(),
+    profile: 'demo-review'
+  }, null, 2)}\n`);
+
+  const results = await executeActions({
+    actions: request.actions,
+    projectRoot,
+    runId,
+    runDir,
+    turn: 1,
+    yes: true,
+    confirm: options.confirm,
+    policySession
+  });
+  const status = summarizeResults(results);
+  const rendered = renderConduitResults({
+    type: 'conduit.results.v1',
+    runId,
+    sessionId: policySession.sessionId,
+    results,
+    status
+  });
+  await writeTextFile(runDir, 'result.txt', rendered);
+
+  return {
+    status: 'executed',
+    runId,
+    runDir,
+    sessionId: policySession.sessionId,
+    results,
+    rendered,
+    allowIds
+  };
+}
+
 function pausedOutput(request: Partial<ActionRequestBlock>, reason: string): ExecuteRequestOutput {
   const repair = createRepairEnvelope({
     reason,
@@ -292,6 +403,19 @@ function pausedOutput(request: Partial<ActionRequestBlock>, reason: string): Exe
 
 async function createUntrustedRequestReview(request: ActionRequestBlock, policyReason: string) {
   const projectRoot = await resolveProjectRoot([process.cwd()]);
+  // Demo profile only, and only for a request where every action starts a
+  // sha256-pinned package: mention the "Always allow this exact package"
+  // choice. Off, or for any other request, the prompt is untouched.
+  const demoPromptLines = isDemoProfileEnabled()
+    ? [
+        ...(packageOnlyDigests(request.actions)
+          ? [
+              `Every action starts a package pinned by sha256 (${packageOnlyDigests(request.actions)!.map((digest) => digest.sha256.slice(0, 12)).join(', ')}). You may choose "Always allow this exact package" so the same package starts without asking again.`
+            ]
+          : []),
+        'Demo profile is on: approving lets these actions run programs on this computer.'
+      ]
+    : [];
   return createApprovalRequest({
     action: {
       id: 'review_untrusted_request',
@@ -318,11 +442,10 @@ async function createUntrustedRequestReview(request: ActionRequestBlock, policyR
       `Permissions: ${JSON.stringify(request.permissions ?? [])}`,
       `Actions: ${request.actions.map((action) => `${action.id}:${action.tool}`).join(', ') || '(none)'}`,
       '',
-      // Demo profile only: warn the person that this approval lets actions run
-      // programs. Off, the prompt array is exactly what it is today.
-      ...(isDemoProfileEnabled()
-        ? ['Demo profile is on: approving lets these actions run programs on this computer.']
-        : []),
+      // Demo profile only. Off, the prompt array is exactly what it is today
+      // (the demo line, and for package-only requests one "Always allow this
+      // exact package" line before it).
+      ...demoPromptLines,
       'Approve only if you trust the source and intended local effects.'
     ].join('\n')
   });

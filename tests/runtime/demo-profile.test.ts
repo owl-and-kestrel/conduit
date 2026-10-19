@@ -301,5 +301,26 @@ describe('demo profile (CONDUIT_DEMO_PROFILE)', () => {
       const status = await (await fetch(`${app.url}/api/status`)).json() as any;
       expect(status.capabilities.services).toBe(true);
     });
+
+    it('on: a malformed percent escape in a service id is a 400, not a 500', async () => {
+      process.env.CONDUIT_DEMO_PROFILE = '1';
+      app = await startControlPanel({ host: '127.0.0.1', port: 0, clipboard: new MemoryClipboard() });
+
+      const stop = await fetch(`${app.url}/api/services/%E0%A4%A/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      expect(stop.status).toBe(400);
+      expect(await stop.json()).toEqual({ error: 'Invalid service id.' });
+
+      // A well-formed id that names no service is still the 404 it was.
+      const unknown = await fetch(`${app.url}/api/services/svc_none/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      expect(unknown.status).toBe(404);
+    });
   });
 });

@@ -299,7 +299,13 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         sendJson(res, 404, { error: 'Not found' });
         return;
       }
-      const service = await serviceRegistry.stop(decodeURIComponent(serviceStopMatch[1]));
+      const serviceId = decodePathSegment(serviceStopMatch[1]);
+      if (serviceId === null) {
+        // A malformed percent escape is a bad request, not a server fault.
+        sendJson(res, 400, { error: 'Invalid service id.' });
+        return;
+      }
+      const service = await serviceRegistry.stop(serviceId);
       if (!service) {
         sendJson(res, 404, { error: 'Unknown service.' });
         return;
@@ -592,6 +598,16 @@ function createExtensionInstallRequest(): Record<string, unknown> {
     ],
     resultMode: { transport: 'app', format: 'markdown' }
   };
+}
+
+/** decodeURIComponent for one path segment, or null when its percent escapes
+ * are malformed (decodeURIComponent throws URIError on those). */
+function decodePathSegment(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
 }
 
 function sendHtml(res: http.ServerResponse, html: string): void {

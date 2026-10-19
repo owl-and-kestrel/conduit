@@ -30,7 +30,7 @@ arbitrary source
 
 Conduit is arbitrary code execution by design. It is roughly comparable to running a downloaded program or a shell script. It is not a safety product and not a sandbox. Its bar is `curl | sh`, which is how people already run arbitrary code from the internet; Conduit aims to clear it.
 
-What it adds is the trust gate: you know who is asking. Sources you trust (a paired session) run quietly. Anything else asks you once. A request cannot be replayed, and every process Conduit starts is supervised and cannot outlive the app.
+What it adds is the trust gate: you know who is asking. Sources you trust (a paired session) run quietly. Anything else asks you once. A request cannot be replayed, and the macOS menu-bar app supervises the services it starts and stops their process trees when you quit.
 
 Conduit decides who may ask; it does not sandbox what runs.
 

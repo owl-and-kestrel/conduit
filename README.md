@@ -9,8 +9,8 @@ power-user skill. Conduit's aim is one click: no installer, no terminal.
 
 The trust model is built: you know who is asking. Sources you trust (a paired
 session) run quietly. Anything else asks you once. A request cannot be
-replayed; every call carries a one-shot nonce. Every process Conduit starts is
-supervised and cannot outlive the app, so quitting stops everything.
+replayed; every call carries a one-shot nonce. The macOS menu-bar app
+supervises the services it starts and stops their process trees when you quit.
 
 Conduit is not a safety product, not a sandbox, not a ChatGPT wrapper and not
 an auth bypass. It is a local runtime plus transports, built by Owl + Kestrel.

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Conduit</title>
-  <meta name="description" content="Conduit is a local consent layer for clipboard and agent-loop commands: a chatbot asks, you see exactly what it wants, and nothing runs until you approve it.">
+  <meta name="description" content="Conduit is better than curl | sh: arbitrary code execution for everyone, where trusted sources run quietly and anything else asks once.">
   <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
@@ -28,7 +28,7 @@
           <span class="tag warn">Preview: unsigned, not notarized</span>
         </div>
         <h1>Copy the request. Only the request.</h1>
-        <p class="lead">Conduit is a local runner for explicit, inspectable requests from chatbots, docs, and paired sessions. It gives clipboard workflows a consent boundary that is less cursed than pasting arbitrary shell into a terminal.</p>
+        <p class="lead">Conduit runs arbitrary code on your machine, and that is the point. It is not a sandbox: it decides who may ask, runs trusted sources quietly and asks once for anything else.</p>
         <div class="actions">
           <a class="button primary" href="download.html">Get Conduit</a>
           <a class="button" href="api.html">Read the API</a>
@@ -107,8 +107,8 @@
 
     <section class="band">
       <div class="section">
-        <h2>The useful unsafe thing, boxed up.</h2>
-        <p class="lead">Conduit keeps the agent loop available for elevated authenticated sessions, while the default clipboard gesture stays narrow: copy the Conduit request, and only the Conduit request.</p>
+        <h2>Better than <code>curl | sh</code>.</h2>
+        <p class="lead">Conduit does not sandbox what runs. It decides who may ask, runs trusted sources quietly and asks once for anything else.</p>
         <pre class="code"><span class="c"># from a source checkout (Node 20+)</span>
 npm run conduit -- session create --label "ChatGPT" --root /path/to/project
 npm run conduit -- daemon start --interval-ms 1000

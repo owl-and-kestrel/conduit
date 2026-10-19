@@ -1,11 +1,12 @@
 # Consent-loop demo results
 
-> Conduit does not make local execution safe. It makes local execution legible.
+> Better than `curl | sh`: arbitrary code execution for everyone. This is not
+> a sandbox; the trust gate decides who may ask.
 
-`scripts/demo-consent-loop.ts` (`npm run demo:consent`) checks that claim with
-the real CLI. It drives one trusted session through three arms and counts what
-happened: daemon events, approval asks (`conduit approvals list`) and runs
-(`conduit runs list`).
+`scripts/demo-consent-loop.ts` (`npm run demo:consent`) checks the trust gate
+behind that claim with the real CLI. It drives one trusted session through
+three arms and counts what happened: daemon events, approval asks
+(`conduit approvals list`) and runs (`conduit runs list`).
 
 | Arm | Envelope | Expected outcome |
 |---|---|---|
@@ -29,6 +30,8 @@ is refused outright. It does not become an ask.
 ## Results (Cedar, linux-arm64, Node v22.23.2, base 7324f102)
 
 All 23 checks passed in each of three consecutive runs (2026-10-19 00:18Z to 00:20Z UTC).
+The run JSON files are recorded output and keep the thesis string the script
+printed at the time; the current thesis is the one quoted at the top.
 
 | Run | trusted: daemon / arm ms | untrusted: daemon / arm / deny ms | replay: daemon / arm ms | asks (trusted / untrusted / replay) | executions |
 |---|---|---|---|---|---|

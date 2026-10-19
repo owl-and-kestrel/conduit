@@ -21,7 +21,7 @@
   </header>
   <main class="page">
     <h1>About Conduit</h1>
-    <p class="lead">Conduit exists because chatbot commands are already a real workflow. The question is whether the local bridge is explicit, inspectable, and policy-routed, or whether users keep pasting mystery text into terminals.</p>
+    <p class="lead">Running real code on your own machine still carries a power-user tax: an installer to download, a terminal to open, setup steps to follow. Conduit removes that tax so anyone can run arbitrary code with one click, no installer, no terminal. It is better than <code>curl | sh</code>, and it is not a safety product.</p>
     <section class="grid">
       <article class="card">
         <h3>Local first</h3>
@@ -39,6 +39,7 @@
     <section class="section">
       <h2>What v0 is proving</h2>
       <p>Conduit v0 is proving the narrow loop: create a trusted session, copy an exact request envelope, execute locally through policy, rotate the nonce, and return a result block that can be pasted back into a chat.</p>
+      <p>Not built yet: a one-click "Start a server" flow, where a multiplayer game page offers a button that runs the game's server code as a background process on your machine with no separate download or install; an optional "run clean" mode; and a reusable package that can stay behind and age off on its own. Cleanup is the job of whoever writes the code that runs.</p>
     </section>
   </main>
   <footer class="footer"><span>The default posture is boring on purpose. Unsafe power-user modes should look unsafe.</span><span>An Owl + Kestrel project / <a href="https://github.com/owl-and-kestrel/conduit">Source</a></span></footer>

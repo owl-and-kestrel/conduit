@@ -28,9 +28,11 @@ arbitrary source
   -> auditable result
 ```
 
-Conduit is dangerous by nature. It is roughly comparable to installing a random program or running a shell script, though it can be safer when requests are declarative, scoped, signed, logged, and reviewed.
+Conduit is arbitrary code execution by design. It is roughly comparable to running a downloaded program or a shell script. It is not a safety product and not a sandbox. Its bar is `curl | sh`, which is how people already run arbitrary code from the internet; Conduit aims to clear it.
 
-Conduit does not make local execution safe. It makes local execution legible.
+What it adds is the trust gate: you know who is asking. Sources you trust (a paired session) run quietly. Anything else asks you once. A request cannot be replayed, and every process Conduit starts is supervised and cannot outlive the app.
+
+Conduit decides who may ask; it does not sandbox what runs.
 
 ---
 
@@ -66,6 +68,10 @@ Conduit is hands.
 ---
 
 ## 2. Product Thesis
+
+Running real code on your own machine still assumes a power user: download an installer, open a terminal, follow setup steps. AI agents can now run code locally when they have a local connection, so the larger point is letting anyone run arbitrary code with one click, no installer, no terminal.
+
+Direction, not built yet: a one-click "Start a server" flow, for example a multiplayer game button that runs the game's server code as a background process on your machine with no separate download or install; an optional "run clean" mode; and a reusable package that can stay behind and age off on its own. Cleanup is the job of whoever writes the code that runs.
 
 People already run untrusted local actions through bad interfaces:
 

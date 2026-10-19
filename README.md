@@ -1,14 +1,26 @@
 # Conduit
 
-**A local control plane for consent-shaped agent execution.**
+**Better than `curl | sh`. Arbitrary code execution for everyone: one click,
+no installer, no terminal.**
 
-When a chat model says "paste this in your terminal and run it", Conduit gives
-it a structured, policy-checked way to ask your machine for the same work
-instead. You see where the request came from, what it may touch and every
-action it will run, and nothing with local effects happens until you approve it.
+Conduit is arbitrary code execution on your machine. That is the point.
+Running real code from a source you decide to trust should not stay a
+power-user skill. Conduit's aim is one click: no installer, no terminal.
 
-Conduit is not a ChatGPT wrapper, not an auth bypass, and not a magic sandbox.
-It is a local runtime plus transports, built by Owl + Kestrel.
+The trust model is built: you know who is asking. Sources you trust (a paired
+session) run quietly. Anything else asks you once. A request cannot be
+replayed; every call carries a one-shot nonce. Every process Conduit starts is
+supervised and cannot outlive the app, so quitting stops everything.
+
+Conduit is not a safety product, not a sandbox, not a ChatGPT wrapper and not
+an auth bypass. It is a local runtime plus transports, built by Owl + Kestrel.
+
+Direction, not built yet: a one-click "Start a server" flow, where a
+multiplayer game page offers a button that runs the game's server code as a
+background process on your machine with no separate download or install; an
+optional "run clean" mode; and a reusable package that can stay behind and age
+off on its own. Cleanup is the job of whoever writes the code that runs, as
+with any well-behaved program.
 
 > **Status: preview.** v0.0.1 is a closed-alpha build. The macOS app is
 > **not code-signed or notarized by Apple**, so macOS will warn on first

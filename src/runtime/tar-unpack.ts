@@ -175,6 +175,7 @@ export async function unpackTarGz(archivePath: string, destDir: string, limits: 
   const files: string[] = [];
   const seenPaths = new Set<string>();
   let entryCount = 0;
+  let paxHeaders = 0;
   let fileBytes = 0;
 
   try {
@@ -242,6 +243,11 @@ export async function unpackTarGz(archivePath: string, destDir: string, limits: 
 
       if (typeflag === 'x' || typeflag === 'g') {
         // Pax extended (x) or global (g) header: the body is pax records.
+        // Pax headers count toward maxEntries: thousands of them would keep the start busy too.
+        if (entryCount + paxHeaders + 1 > limits.maxEntries) {
+          throw new PackageArchiveError(`Package has more entries than the limit of ${limits.maxEntries} (at pax header '${name}').`);
+        }
+        paxHeaders += 1;
         if (size > limits.maxPaxHeaderBytes) {
           throw new PackageArchiveError(
             `Package pax header '${name}' is ${size} bytes; the limit is ${limits.maxPaxHeaderBytes}.`
@@ -294,7 +300,7 @@ export async function unpackTarGz(archivePath: string, destDir: string, limits: 
 
       // Bounds are checked from the header, BEFORE any data is written.
       const entryBytes = isDirectory ? 0 : size;
-      if (entryCount + 1 > limits.maxEntries) {
+      if (entryCount + paxHeaders + 1 > limits.maxEntries) {
         throw new PackageArchiveError(`Package has more entries than the limit of ${limits.maxEntries} (at '${name}').`);
       }
       if (fileBytes + entryBytes > limits.maxUnpackedBytes) {

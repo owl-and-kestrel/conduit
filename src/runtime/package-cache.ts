@@ -29,7 +29,7 @@ export const PACKAGE_MAX_UNPACKED_BYTES = 1024 * 1024 * 1024;
 
 /**
  * Millions of tiny entries exhaust inodes and keep the start busy for
- * minutes; this bounds how many files and directories one package may hold.
+ * minutes; this bounds how many files, directories and pax headers one package may hold.
  */
 export const PACKAGE_MAX_ENTRIES = 50_000;
 

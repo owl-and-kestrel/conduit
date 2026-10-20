@@ -99,8 +99,11 @@ Conduit can start this game two ways, both only with `CONDUIT_DEMO_PROFILE=1`:
   files and names the entry), verifies the sha256 before unpacking, and runs
   it from the read-only `cache/packages/<sha256>/` tree, so the hash covers
   every file. Approving with "Always allow this exact package" makes the next
-  start of the same sha256 ask nothing and fetch nothing; any other hash asks
-  again. `npm run demo:server` exercises this (arm E). The launcher switches
+  start of the same sha256 in the same network mode ask nothing and fetch
+  nothing; any other hash asks again, and so does a `lan: true` start of a
+  package allowed from a loopback ask (an allow made on a `lan: true` ask also
+  covers loopback starts). `npm run demo:server` exercises this (arm E). The
+  launcher switches
   to it once the package has a published https URL (a publishing decision).
 
 | | CLI and API | Menu bar (S4, demo profile) |

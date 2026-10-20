@@ -64,6 +64,14 @@ final class DemoServicesTests: XCTestCase {
         XCTAssertFalse(ask.offersAlwaysAllow)
     }
 
+    func testRepeatedDigestsAreListedOnce() throws {
+        let second = #"{"id":"start2","tool":"service.start","args":{"name":"Tiny Arena 2","package":{"url":"https://example.test/a.tgz","sha256":"\#(sha)"}}}"#
+        let ask = try XCTUnwrap(ServiceAsk.make(for: review(actions: "[" + packageStart + "," + second + "]"), demoProfile: true))
+        XCTAssertEqual(ask.serviceNames, ["Tiny Arena", "Tiny Arena 2"])
+        XCTAssertEqual(ask.packageDigests, [sha])
+        XCTAssertTrue(ask.packageOnly)
+    }
+
     func testPackageOnlyIsFalseForThePathForm() throws {
         let pathStart = startActionArgs(#"{"name":"Tiny Arena","sha256":"\#(sha)","path":"server.mjs"}"#)
         let ask = try XCTUnwrap(ServiceAsk.make(for: review(actions: "[" + pathStart + "]"), demoProfile: true))

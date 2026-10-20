@@ -55,8 +55,10 @@ public struct ServiceAsk: Equatable {
         guard !starts.isEmpty else { return nil }
 
         let serviceNames = starts.map { $0.args?.name ?? "service" }
-        let packageDigests = starts.compactMap { $0.args?.package?.sha256 }.filter(isSha256Digest)
-        let pathDigests = starts.compactMap { $0.args?.sha256 }.filter(isSha256Digest)
+        // Each digest once, in request order: two starts of the same package
+        // pin the same bytes, and the UI lists digests by value (review G-02).
+        let packageDigests = unique(starts.compactMap { $0.args?.package?.sha256 }.filter(isSha256Digest))
+        let pathDigests = unique(starts.compactMap { $0.args?.sha256 }.filter(isSha256Digest))
         let acceptsLocalNetwork = starts.contains { $0.args?.lan == true }
 
         let actions = approval.action.args?.actions ?? []
@@ -77,7 +79,12 @@ public struct ServiceAsk: Equatable {
         )
     }
 
-    /// the first 12 hex digits of a digest, for one line of UI.
+    static func unique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.filter { seen.insert($0).inserted }
+    }
+
+    /// The first 12 hex digits of a digest, for one line of UI.
     public static func shortDigest(_ sha: String) -> String {
         String(sha.prefix(12))
     }

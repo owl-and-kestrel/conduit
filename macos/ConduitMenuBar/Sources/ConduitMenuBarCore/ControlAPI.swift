@@ -288,7 +288,10 @@ public final class ControlClient {
         guard isValidServiceId(id) else {
             throw ControlAPIError(statusCode: nil, userMessage: "That is not a Conduit service id.")
         }
-        let response: ServiceStopResponse = try await send(.stopService(id: id), body: [:])
+        // Control answers after the program exits: TERM, up to 3 s grace,
+        // then KILL and its wait. 15 s covers that with room to spare, so a
+        // slow stop is not reported as a failure while it is still working.
+        let response: ServiceStopResponse = try await send(.stopService(id: id), body: [:], timeout: 15)
         return response.service
     }
 

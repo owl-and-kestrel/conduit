@@ -286,6 +286,28 @@ private struct AskRow: View {
         return model.demoProfile ? "Run this one request now; with the demo profile on it may start programs (Return)" : "Run this one request read-only (Return)"
     }
 
+    private var detailsList: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(AskPresentation.details(for: ask, demoProfile: model.demoProfile).enumerated()), id: \.offset) { _, row in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(row.label).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    Text(row.value)
+                        .font(.system(.caption, design: row.label == "Command" || row.label == "Patch" || row.label == "Path" ? .monospaced : .default))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var detailsToggle: some View {
+        Button(expanded ? "Hide details" : "Details") {
+            if expanded { model.expanded.remove(ask.approvalId) } else { model.expanded.insert(ask.approvalId) }
+        }
+        .buttonStyle(.borderless)
+        .help("Show or hide details (Space)")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top) {
@@ -302,60 +324,62 @@ private struct AskRow: View {
                 Spacer()
             }
             if let serviceAsk {
+                // Demo profile only. The decision buttons sit right under what
+                // will run and above Details, each row on its own line, so a
+                // long ask never pushes them out of the 340 pt list.
                 ServiceAskRows(serviceAsk: serviceAsk, model: model)
-            }
-            if expanded {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(AskPresentation.details(for: ask, demoProfile: model.demoProfile).enumerated()), id: \.offset) { _, row in
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(row.label).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                            Text(row.value)
-                                .font(.system(.caption, design: row.label == "Command" || row.label == "Patch" || row.label == "Path" ? .monospaced : .default))
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-            }
-            HStack(spacing: 8) {
-                if serviceAsk != nil {
+                HStack(spacing: 8) {
                     Button("Allow once") { model.actions?.decide(ask.approvalId, .approve) }
                         .buttonStyle(.borderedProminent)
                         .disabled(deciding)
                         .help("Run this one request now; the next request asks again (Return)")
-                    if serviceAsk?.offersAlwaysAllow == true && model.packageAllowsSupported {
+                    if serviceAsk.offersAlwaysAllow && model.packageAllowsSupported {
                         Button("Always allow this exact package") { model.actions?.decideAlwaysAllowPackage(ask.approvalId) }
                             .buttonStyle(.bordered)
                             .disabled(deciding)
-                            .help("Run it now, and start a package with this exact sha256 again without asking. A different sha256 asks again. Revoke with `conduit packages revoke`.")
+                            .help("Run it now, and start a package with this exact sha256 again without asking, including a later request that asks to accept connections from your local network. A different sha256 asks again. Revoke with `conduit packages revoke`.")
                     }
-                } else {
+                    Button("Deny") { model.actions?.decide(ask.approvalId, .deny) }
+                        .buttonStyle(.bordered)
+                        .disabled(deciding)
+                        .help("Deny (⌘⌫)")
+                    Spacer()
+                    if deciding { ProgressView().controlSize(.small) }
+                }
+                .controlSize(.small)
+                if expanded { detailsList }
+                HStack(spacing: 8) {
+                    Spacer()
+                    detailsToggle
+                    Button("Open in panel") { model.actions?.openDetails(ask.approvalId) }
+                        .buttonStyle(.borderless)
+                }
+                .controlSize(.small)
+            } else {
+                if expanded { detailsList }
+                HStack(spacing: 8) {
                     Button(ask.isReview ? "Approve once" : "Allow once") { model.actions?.decide(ask.approvalId, .approve) }
                         .buttonStyle(.borderedProminent)
                         .disabled(deciding)
                         .help(approveHelp)
-                }
-                if AllowForThisChat.isOffered(for: ask) {
-                    Button("Allow for this chat") { model.actions?.decideForThisChat(ask.approvalId) }
+                    if AllowForThisChat.isOffered(for: ask) {
+                        Button("Allow for this chat") { model.actions?.decideForThisChat(ask.approvalId) }
+                            .buttonStyle(.bordered)
+                            .disabled(deciding)
+                            .help("Also allow this exact \(ask.action.tool == "shell.run" ? "command" : "file write") again in this chat, until the chat is revoked or Conduit restarts. (⌘Return)")
+                    }
+                    Button("Deny") { model.actions?.decide(ask.approvalId, .deny) }
                         .buttonStyle(.bordered)
                         .disabled(deciding)
-                        .help("Also allow this exact \(ask.action.tool == "shell.run" ? "command" : "file write") again in this chat, until the chat is revoked or Conduit restarts. (⌘Return)")
+                        .help("Deny (⌘⌫)")
+                    Spacer()
+                    detailsToggle
+                    Button("Open in panel") { model.actions?.openDetails(ask.approvalId) }
+                        .buttonStyle(.borderless)
+                    if deciding { ProgressView().controlSize(.small) }
                 }
-                Button("Deny") { model.actions?.decide(ask.approvalId, .deny) }
-                    .buttonStyle(.bordered)
-                    .disabled(deciding)
-                    .help("Deny (⌘⌫)")
-                Spacer()
-                Button(expanded ? "Hide details" : "Details") {
-                    if expanded { model.expanded.remove(ask.approvalId) } else { model.expanded.insert(ask.approvalId) }
-                }
-                .buttonStyle(.borderless)
-                .help("Show or hide details (Space)")
-                Button("Open in panel") { model.actions?.openDetails(ask.approvalId) }
-                    .buttonStyle(.borderless)
-                if deciding { ProgressView().controlSize(.small) }
+                .controlSize(.small)
             }
-            .controlSize(.small)
         }
         .padding(8)
         .background(

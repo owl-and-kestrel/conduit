@@ -289,6 +289,20 @@ describe('package cache (preparePackage, in-process, loopback only)', () => {
       expect(String(error)).toMatch(/limit of 10/);
     });
 
+    it('pax header bytes count toward maxUnpackedBytes', async () => {
+      const archive = makeTarGz([
+        { name: 'global', type: 'g', body: paxRecords({ comment: 'x'.repeat(200) }) },
+        { name: 'package/package.json', body: JSON.stringify(VALID_MANIFEST) },
+        { name: 'package/server.mjs', body: 'x' }
+      ]);
+      const error = await preparePackage(
+        { url: serve(archive), sha256: sha256Of(archive), size: archive.length },
+        { limits: { maxUnpackedBytes: 150 } }
+      ).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(PackageArchiveError);
+      expect(String(error)).toMatch(/pax headers included\) than the limit of 150/);
+    });
+
     it('a size that is given but wrong is rejected', async () => {
       const archive = validPackageTar();
       const error = await preparePackage({

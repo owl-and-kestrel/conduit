@@ -176,6 +176,7 @@ export async function unpackTarGz(archivePath: string, destDir: string, limits: 
   const seenPaths = new Set<string>();
   let entryCount = 0;
   let paxHeaders = 0;
+  let paxBytes = 0;
   let fileBytes = 0;
 
   try {
@@ -253,6 +254,13 @@ export async function unpackTarGz(archivePath: string, destDir: string, limits: 
             `Package pax header '${name}' is ${size} bytes; the limit is ${limits.maxPaxHeaderBytes}.`
           );
         }
+        // Pax bodies are decompressed and parsed though never written, so they count toward maxUnpackedBytes.
+        if (fileBytes + paxBytes + size > limits.maxUnpackedBytes) {
+          throw new PackageArchiveError(
+            `Package is larger unpacked (${fileBytes + paxBytes + size} bytes, pax headers included) than the limit of ${limits.maxUnpackedBytes} (at pax header '${name}').`
+          );
+        }
+        paxBytes += size;
         const body = await reader.readExact(size);
         if (!body) {
           throw new PackageArchiveError(`Package archive is truncated in the pax header '${name}'.`);
@@ -303,9 +311,9 @@ export async function unpackTarGz(archivePath: string, destDir: string, limits: 
       if (entryCount + paxHeaders + 1 > limits.maxEntries) {
         throw new PackageArchiveError(`Package has more entries than the limit of ${limits.maxEntries} (at '${name}').`);
       }
-      if (fileBytes + entryBytes > limits.maxUnpackedBytes) {
+      if (fileBytes + paxBytes + entryBytes > limits.maxUnpackedBytes) {
         throw new PackageArchiveError(
-          `Package is larger unpacked (${fileBytes + entryBytes} bytes) than the limit of ${limits.maxUnpackedBytes} (at '${name}').`
+          `Package is larger unpacked (${fileBytes + paxBytes + entryBytes} bytes) than the limit of ${limits.maxUnpackedBytes} (at '${name}').`
         );
       }
 

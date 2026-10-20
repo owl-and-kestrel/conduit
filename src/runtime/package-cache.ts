@@ -23,7 +23,8 @@ export const PACKAGE_MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 
 /**
  * A small gzip can expand ~1000x (decompression bomb) and fill the disk;
- * this caps what one accepted archive may expand to.
+ * this caps what one accepted archive may expand to. Pax header bodies count
+ * too: they are decompressed and parsed though never written.
  */
 export const PACKAGE_MAX_UNPACKED_BYTES = 1024 * 1024 * 1024;
 

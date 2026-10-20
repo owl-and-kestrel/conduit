@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -153,6 +153,36 @@ describe('package allow network mode (in-process, no fetch)', () => {
     const lanStart = await executeRequestFromUnknown(packageRequest(sha, 'lan'));
     expect(lanStart.status).toBe('requires_review');
     expect(lanStart.allowIds).toBeUndefined();
+  });
+
+  it('the migrated mark survives a save and a reload, and a migrated record never reads as lan (review G-01)', async () => {
+    const sha = '6'.repeat(64);
+    const stateDir = path.join(tempRoot, 'state');
+    mkdirSync(stateDir, { recursive: true });
+    const storeFile = path.join(stateDir, 'package-allows.json');
+    writeFileSync(storeFile, `${JSON.stringify({
+      version: 1,
+      allows: [
+        { allowId: 'allow_v1', sha256: sha, state: 'active', allowedAt: '2026-10-19T00:00:00.000Z', allowedBy: 'cli', approvalId: 'approval_v1', url: PACKAGE_URL },
+        // Inconsistent on disk: marked migrated but saying lan. Read as local.
+        { allowId: 'allow_odd', sha256: '5'.repeat(64), state: 'active', allowedAt: '2026-10-18T00:00:00.000Z', allowedBy: 'cli', approvalId: 'approval_odd', url: PACKAGE_URL, network: 'lan', networkMigrated: true }
+      ]
+    })}\n`);
+
+    // Any write saves the normalized store (version 2, mark on disk).
+    await allowFromRequest([packageAction('4'.repeat(64), 'local')], 'approval_other');
+    const saved = JSON.parse(readFileSync(storeFile, 'utf8')) as { version: number; allows: Array<Record<string, unknown>> };
+    expect(saved.version).toBe(2);
+    expect(saved.allows.find((allow) => allow.allowId === 'allow_v1')).toMatchObject({ network: 'local', networkMigrated: true });
+
+    // Reloaded after the save: still migrated, still local only.
+    const listed = await listPackageAllows();
+    expect(listed.find((allow) => allow.allowId === 'allow_v1')).toMatchObject({ network: 'local', networkMigrated: true });
+    expect(listed.find((allow) => allow.allowId === 'allow_odd')).toMatchObject({ network: 'local', networkMigrated: true });
+    expect(await findActivePackageAllow(sha, 'lan')).toBeNull();
+    expect(await findActivePackageAllow('5'.repeat(64), 'lan')).toBeNull();
+    // A record written in the new shape carries no mark.
+    expect(listed.find((allow) => allow.sha256 === '4'.repeat(64))?.networkMigrated).toBeUndefined();
   });
 
   it('addPackageAllows is idempotent per mode, widens to lan, and dedupes one request to the widest mode', async () => {

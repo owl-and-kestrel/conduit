@@ -101,11 +101,13 @@ export function allowCovers(allowNetwork: PackageAllowNetwork, requested: Packag
  * Reads one stored record into the version-2 shape: a missing or invalid
  * network (a hash-only version-1 record, or corrupt data) reads as 'local' and
  * is marked `networkMigrated: true`; the next save writes the normalized
- * record.
+ * record. A record already saved with `networkMigrated: true` keeps the mark
+ * on every later load (review G-01) and always reads as 'local', even if its
+ * stored network says otherwise (fail closed: a migrated allow never widens).
  */
 function normalizeAllow(raw: unknown): PackageAllow {
   const allow = (raw ?? {}) as PackageAllow;
-  const migrated = allow.network !== 'lan' && allow.network !== 'local';
+  const migrated = allow.networkMigrated === true || (allow.network !== 'lan' && allow.network !== 'local');
   const network: PackageAllowNetwork = migrated ? 'local' : allow.network;
   const normalized: PackageAllow = { ...allow, network };
   if (migrated) {

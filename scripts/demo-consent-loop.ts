@@ -52,7 +52,7 @@ import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLI_ENTRY = path.join(REPO_ROOT, 'src', 'cli', 'index.ts');
-const THESIS = 'Better than curl | sh: arbitrary code execution for everyone. Conduit is not a sandbox; it decides who may ask. Trusted sources run quietly, anything else asks once, and a request cannot be replayed.';
+const THESIS = 'Better than curl | sh: arbitrary code execution for everyone. Conduit is not a sandbox; it decides who may ask. Trusted sources run quietly, an unknown source asks once, and a request cannot be replayed.';
 const APP_URL_PATTERN = /Conduit app: (http:\/\/127\.0\.0\.1:\d+)/;
 const FORBIDDEN_PORTS = new Set([47831, 3333]);
 const CLI_TIMEOUT_MS = 60_000;

@@ -8,7 +8,7 @@ Running real code from a source you decide to trust should not stay a
 power-user skill. Conduit's aim is one click: no installer, no terminal.
 
 The trust model is built: you know who is asking. Sources you trust (a paired
-session) run quietly. Anything else asks you once. A request cannot be
+session) run quietly. An unknown source asks you once. A request cannot be
 replayed; every call carries a one-shot nonce. The macOS menu-bar app
 supervises the services it starts and stops their process trees when you quit.
 

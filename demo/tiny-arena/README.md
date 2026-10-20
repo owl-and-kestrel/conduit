@@ -103,9 +103,9 @@ Conduit can start this game two ways, both only with `CONDUIT_DEMO_PROFILE=1`:
   again. `npm run demo:server` exercises this (arm E). The launcher switches
   to it once the package has a published https URL (a publishing decision).
 
-| | Today | Later (S4, Mac) |
+| | CLI and API | Menu bar (S4, demo profile) |
 |---|---|---|
-| Asking | The `conduit://` link becomes one review ask (0 for an allowed package). | The menu-bar ask shows the sha256 and "accepts connections from your network". |
-| Opening the game | The URL is in the result; you open it. | The browser opens it when the game is ready. |
+| Asking | The `conduit://` link becomes one review ask (0 for an allowed package). | The ask shows the sha256, who the request says it is from, and "accepts connections from your local network"; Allow once, Always allow this exact package, Deny. |
+| Opening the game | The URL is in the result; you open it. | After you allow it in the menu bar (or an allowed package starts from a link), the browser opens it when the game is ready. |
 | Stopping | `conduit services stop <id>` (SIGTERM; the game exits 0). | A Services row with Stop. |
-| Phone join | Needs a Mac on a real LAN (`lan: true`); the harness runs loopback only. | Recorded Mac run with a phone. |
+| Phone join | Needs a Mac on a real LAN (`lan: true`); the harness runs loopback only. | Needs a person with a phone on the same Wi-Fi. |

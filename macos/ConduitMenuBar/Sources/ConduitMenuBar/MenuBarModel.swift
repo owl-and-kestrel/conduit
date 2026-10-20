@@ -36,6 +36,16 @@ final class MenuBarModel: ObservableObject {
     /// Mirrors `GET /api/settings`; false (the cautious default) until read.
     @Published var returnApprovesShellWithoutDetails = false
     @Published var settingsSupported = false
+    /// Demo profile only: the adopted Control reports `capabilities.demoProfile`
+    /// (it runs with CONDUIT_DEMO_PROFILE=1). False, the default, keeps the
+    /// popover exactly as it was before S4: no Services section, no package
+    /// rows and no "Always allow this exact package" button.
+    @Published var demoProfile = false
+    /// Demo profile only: Control also reports `capabilities.packageAllows`.
+    @Published var packageAllowsSupported = false
+    /// Demo profile only: programs `service.start` started (GET /api/services).
+    @Published var runningServices: [RunningServiceRow] = []
+    @Published var stoppingServiceIds: Set<String> = []
 
     weak var actions: MenuBarActions?
 
@@ -99,6 +109,11 @@ final class MenuBarModel: ObservableObject {
 protocol MenuBarActions: AnyObject {
     func decide(_ approvalId: String, _ decision: ApprovalDecision)
     func decideForThisChat(_ approvalId: String)
+    /// Demo profile only: approve with "Always allow this exact package".
+    func decideAlwaysAllowPackage(_ approvalId: String)
+    /// Demo profile only: POST /api/services/:id/stop.
+    func stopService(_ serviceId: String)
+    func copyToClipboard(_ text: String, what: String)
     func setReturnApprovesShellWithoutDetails(_ value: Bool)
     func togglePause()
     func stopAll()

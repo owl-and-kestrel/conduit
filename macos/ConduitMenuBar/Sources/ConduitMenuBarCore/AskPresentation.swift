@@ -64,7 +64,10 @@ public enum AskPresentation {
 
     /// Detail lines for the expanded row. Everything a person needs to see
     /// before saying yes: the exact command, path, patch or requested actions.
-    public static func details(for approval: ApprovalSummary) -> [(label: String, value: String)] {
+    /// `demoProfile` (Control reports `capabilities.demoProfile`) changes only
+    /// the review's Decision line, because an approved review then runs as
+    /// `demo-review` and can run programs; off, the rows are what they were.
+    public static func details(for approval: ApprovalSummary, demoProfile: Bool = false) -> [(label: String, value: String)] {
         var rows: [(String, String)] = [("Source", source(for: approval))]
         let args = approval.action.args
         if let command = args?.command { rows.append(("Command", command)) }
@@ -84,10 +87,14 @@ public enum AskPresentation {
         }
         if let policy = approval.policyReason, !policy.isEmpty { rows.append(("Policy", policy)) }
         if approval.isReview {
-            rows.append(("Decision", "Approve once runs this one request under a read-only policy. It does not trust the source."))
+            rows.append(("Decision", demoProfile ? demoReviewDecision : "Approve once runs this one request under a read-only policy. It does not trust the source."))
         }
         return rows
     }
+
+    /// The review Decision line while the demo profile is on: approving runs
+    /// this request's actions, which may start programs on this Mac.
+    public static let demoReviewDecision = "Allowing runs this one request now. With the demo profile on, that can start programs on this Mac. It does not trust the source, and the next request asks again unless you chose Always allow for its exact package."
 
     /// "approved · you · menubar", "expired · timeout", for recent activity.
     public static func decisionLine(for approval: ApprovalSummary) -> String {

@@ -41,11 +41,11 @@
   <section class="card">
     <h2>What works today, and what later slices add</h2>
     <table>
-      <tr><th>Step</th><th>This link today</th><th>Next</th></tr>
-      <tr><td>Click Host game</td><td>The <code>conduit://</code> link reaches Conduit (macOS app, then Control <code>POST /api/url/open</code>) and becomes one review ask.</td><td>S4: the menu-bar ask shows the sha256 and "accepts connections from your network".</td></tr>
-      <tr><td>Approve</td><td><code>service.start</code> runs <code>server.mjs</code> from Conduit Control's project root (only when Conduit runs with <code>CONDUIT_DEMO_PROFILE=1</code>), pinned by the entry's sha256 (this link's pin covers <code>server.mjs</code> only, not the files it imports). The game URL is in the approval result; you open it.</td><td>Package form (S2, in Conduit now): once this package has a published https URL, the link names <code>{url, sha256}</code>; Conduit fetches and verifies it into a content-addressed cache and runs it from there, so the hash covers every file. S4: the browser opens the game when it is ready.</td></tr>
+      <tr><th>Step</th><th>This link today</th><th>Menu bar and package form</th></tr>
+      <tr><td>Click Host game</td><td>The <code>conduit://</code> link reaches Conduit (macOS app, then Control <code>POST /api/url/open</code>) and becomes one review ask.</td><td>Menu bar (S4, in Conduit now with the demo profile): the ask shows the sha256, who the request says it is from, and "accepts connections from your local network".</td></tr>
+      <tr><td>Approve</td><td><code>service.start</code> runs <code>server.mjs</code> from Conduit Control's project root (only when Conduit runs with <code>CONDUIT_DEMO_PROFILE=1</code>), pinned by the entry's sha256 (this link's pin covers <code>server.mjs</code> only, not the files it imports). The game URL is in the approval result; you open it.</td><td>Package form (S2, in Conduit now): once this package has a published https URL, the link names <code>{url, sha256}</code>; Conduit fetches and verifies it into a content-addressed cache and runs it from there, so the hash covers every file. Menu bar (S4, in Conduit now): after you allow it in the menu bar, the browser opens the game when it is ready.</td></tr>
       <tr><td>Host again</td><td>Asks again.</td><td>Package form: "Always allow this exact package" gives 0 asks and 0 bytes downloaded for the same sha256; a different hash asks again (measured by <code>npm run demo:server</code>).</td></tr>
-      <tr><td>While it runs</td><td><code>conduit services list|stop</code>; Stop sends SIGTERM and the game exits 0.</td><td>S4: a Services row in the menu bar with Stop.</td></tr>
+      <tr><td>While it runs</td><td><code>conduit services list|stop</code>; Stop sends SIGTERM and the game exits 0.</td><td>Menu bar (S4, in Conduit now): a Services row with its address, uptime and Stop.</td></tr>
     </table>
   </section>
 </main>

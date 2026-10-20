@@ -202,6 +202,87 @@ public struct ApprovalRequestedAction: Decodable, Equatable {
     public let id: String
     public let tool: String
     public let reason: String?
+    /// Tool-specific args. Decoded leniently so an unknown arg shape never
+    /// drops the action from the list.
+    public let args: ServiceStartActionArgs?
+
+    public init(id: String, tool: String, reason: String? = nil, args: ServiceStartActionArgs? = nil) {
+        self.id = id
+        self.tool = tool
+        self.reason = reason
+        self.args = args
+    }
+
+    enum CodingKeys: String, CodingKey { case id, tool, reason, args }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        tool = try c.decode(String.self, forKey: .tool)
+        reason = try? c.decode(String.self, forKey: .reason)
+        args = try? c.decode(ServiceStartActionArgs.self, forKey: .args)
+    }
+}
+
+/// Args of a requested action that starts a service (demo profile, S4).
+public struct ServiceStartActionArgs: Decodable, Equatable {
+    public let name: String?
+    public let path: String?
+    public let sha256: String?
+    public let package: ServicePackageRef?
+    public let port: Int?
+    public let lan: Bool?
+
+    public init(
+        name: String? = nil,
+        path: String? = nil,
+        sha256: String? = nil,
+        package: ServicePackageRef? = nil,
+        port: Int? = nil,
+        lan: Bool? = nil
+    ) {
+        self.name = name
+        self.path = path
+        self.sha256 = sha256
+        self.package = package
+        self.port = port
+        self.lan = lan
+    }
+
+    enum CodingKeys: String, CodingKey { case name, path, sha256, package, port, lan }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try? c.decode(String.self, forKey: .name)
+        path = try? c.decode(String.self, forKey: .path)
+        sha256 = try? c.decode(String.self, forKey: .sha256)
+        package = try? c.decode(ServicePackageRef.self, forKey: .package)
+        port = try? c.decode(Int.self, forKey: .port)
+        lan = try? c.decode(Bool.self, forKey: .lan)
+    }
+}
+
+/// The package a `service.start` request would fetch and run, as Control
+/// reports it in review args and (as `ServiceSummaryPackage`) in the list.
+public struct ServicePackageRef: Decodable, Equatable {
+    public let url: String?
+    public let sha256: String?
+    public let size: Int?
+
+    public init(url: String? = nil, sha256: String? = nil, size: Int? = nil) {
+        self.url = url
+        self.sha256 = sha256
+        self.size = size
+    }
+
+    enum CodingKeys: String, CodingKey { case url, sha256, size }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = try? c.decode(String.self, forKey: .url)
+        sha256 = try? c.decode(String.self, forKey: .sha256)
+        size = try? c.decode(Int.self, forKey: .size)
+    }
 }
 
 /// `GET /api/status`. `paused` is optional because an older Control (before S1)
@@ -258,12 +339,31 @@ public struct ControlCapabilities: Decodable, Equatable {
     public let pause: Bool?
     /// `GET/POST /api/settings` exist (Return-key setting).
     public let settings: Bool?
+    /// Demo profile: Control runs with CONDUIT_DEMO_PROFILE=1. Service
+    /// start, always-allow-package and the Services section stay hidden
+    /// unless this is exactly true.
+    public let demoProfile: Bool?
+    /// `GET /api/services` and `POST /api/services/:id/stop` exist.
+    public let services: Bool?
+    /// Package-form "Always allow" decisions are accepted.
+    public let packageAllows: Bool?
 
-    public init(agentHandshake: Bool? = nil, conduitUrlOpen: Bool? = nil, pause: Bool? = nil, settings: Bool? = nil) {
+    public init(
+        agentHandshake: Bool? = nil,
+        conduitUrlOpen: Bool? = nil,
+        pause: Bool? = nil,
+        settings: Bool? = nil,
+        demoProfile: Bool? = nil,
+        services: Bool? = nil,
+        packageAllows: Bool? = nil
+    ) {
         self.agentHandshake = agentHandshake
         self.conduitUrlOpen = conduitUrlOpen
         self.pause = pause
         self.settings = settings
+        self.demoProfile = demoProfile
+        self.services = services
+        self.packageAllows = packageAllows
     }
 }
 
@@ -345,4 +445,105 @@ public struct ControlErrorBody: Decodable {
     public let error: String?
     public let approval: ApprovalSummary?
     public let execution: ApprovalExecutionSummary?
+}
+
+// MARK: - Demo profile: running services (`GET /api/services`)
+
+public struct ServicesResponse: Decodable {
+    public let services: [ServiceSummary]
+}
+
+/// Body of `POST /api/services/:id/stop`.
+public struct ServiceStopResponse: Decodable {
+    public let service: ServiceSummary
+}
+
+public struct ServiceSummaryPackage: Decodable, Equatable {
+    public let sha256: String?
+    public let url: String?
+    public let cached: Bool?
+    public let bytesFetched: Int?
+
+    public init(sha256: String? = nil, url: String? = nil, cached: Bool? = nil, bytesFetched: Int? = nil) {
+        self.sha256 = sha256
+        self.url = url
+        self.cached = cached
+        self.bytesFetched = bytesFetched
+    }
+
+    enum CodingKeys: String, CodingKey { case sha256, url, cached, bytesFetched }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sha256 = try? c.decode(String.self, forKey: .sha256)
+        url = try? c.decode(String.self, forKey: .url)
+        cached = try? c.decode(Bool.self, forKey: .cached)
+        bytesFetched = try? c.decode(Int.self, forKey: .bytesFetched)
+    }
+}
+
+/// One row of `GET /api/services`: a program Control started.
+public struct ServiceSummary: Decodable, Equatable, Identifiable {
+    public let serviceId: String
+    public let name: String
+    public let state: String
+    public let url: String?
+    public let port: Int?
+    public let runId: String?
+    public let lan: Bool?
+    public let sha256: String?
+    public let startedAt: String?
+    public let readyAt: String?
+    public let exitedAt: String?
+    public let package: ServiceSummaryPackage?
+
+    public var id: String { serviceId }
+
+    public init(
+        serviceId: String,
+        name: String,
+        state: String,
+        url: String? = nil,
+        port: Int? = nil,
+        runId: String? = nil,
+        lan: Bool? = nil,
+        sha256: String? = nil,
+        startedAt: String? = nil,
+        readyAt: String? = nil,
+        exitedAt: String? = nil,
+        package: ServiceSummaryPackage? = nil
+    ) {
+        self.serviceId = serviceId
+        self.name = name
+        self.state = state
+        self.url = url
+        self.port = port
+        self.runId = runId
+        self.lan = lan
+        self.sha256 = sha256
+        self.startedAt = startedAt
+        self.readyAt = readyAt
+        self.exitedAt = exitedAt
+        self.package = package
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case serviceId, name, state, url, port, runId, lan, sha256, startedAt, readyAt, exitedAt, package
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        serviceId = try c.decode(String.self, forKey: .serviceId)
+        name = try c.decode(String.self, forKey: .name)
+        state = try c.decode(String.self, forKey: .state)
+        url = try? c.decode(String.self, forKey: .url)
+        port = try? c.decode(Int.self, forKey: .port)
+        runId = try? c.decode(String.self, forKey: .runId)
+        lan = try? c.decode(Bool.self, forKey: .lan)
+        sha256 = try? c.decode(String.self, forKey: .sha256)
+        startedAt = try? c.decode(String.self, forKey: .startedAt)
+        readyAt = try? c.decode(String.self, forKey: .readyAt)
+        exitedAt = try? c.decode(String.self, forKey: .exitedAt)
+        package = try? c.decode(ServiceSummaryPackage.self, forKey: .package)
+    }
 }

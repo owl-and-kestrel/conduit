@@ -82,7 +82,7 @@ How to read the numbers:
 
 ## Not measured here (Mac, S4)
 
-These need a Mac on a real LAN and are not covered by these runs:
+These need a Mac on a real LAN and are not covered by these runs. S4 adds the menu-bar ask, the Services row and the browser opening (see `implementation.md`, slice S4); their live Mac results are recorded outside this file.
 - the `conduit://` click from Safari and Chrome through to the menu-bar ask;
 - the browser opening the game;
 - a phone joining by QR over the LAN;

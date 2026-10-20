@@ -30,12 +30,16 @@ public enum ControlEndpoint: Equatable {
     case decide(id: String, ApprovalDecision)
     case settings
     case updateSettings
+    /// Demo profile only: `GET /api/services`.
+    case services
+    /// Demo profile only: `POST /api/services/:id/stop`.
+    case stopService(id: String)
 
     public var method: String {
         switch self {
-        case .status, .control, .approvals, .approval, .settings:
+        case .status, .control, .approvals, .approval, .settings, .services:
             return "GET"
-        case .pause, .resume, .stopAll, .decide, .updateSettings:
+        case .pause, .resume, .stopAll, .decide, .updateSettings, .stopService:
             return "POST"
         }
     }
@@ -53,8 +57,16 @@ public enum ControlEndpoint: Equatable {
         case .decide(let id, .deny): return "/api/approvals/\(id)/deny"
         case .settings: return "/api/settings"
         case .updateSettings: return "/api/settings"
+        case .services: return "/api/services"
+        case .stopService(let id): return "/api/services/\(id)/stop"
         }
     }
+}
+
+/// Mirrors the server's service-id check (`svc_[A-Za-z0-9_-]+`). A service id
+/// is interpolated into the stop URL, so it is never used unchecked.
+public func isValidServiceId(_ value: String) -> Bool {
+    value.range(of: #"^svc_[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil
 }
 
 /// Mirrors the server's approval-id check (`approval_[A-Za-z0-9_-]+`). An id
@@ -206,31 +218,50 @@ public final class ControlClient {
     /// Approve or deny. `decidedBy` is always the channel the person used.
     /// `forThisChat` is "Allow for this chat": Control remembers the approval
     /// for that one chat (session) only, and refuses it for anything else.
+    /// `alwaysAllowPackage` is "Always allow this exact package" (demo
+    /// profile): Control remembers the approved package by digest.
     public func decide(
         approvalId: String,
         _ decision: ApprovalDecision,
         channel: DecisionChannel,
         reason: String? = nil,
-        forThisChat: Bool = false
+        forThisChat: Bool = false,
+        alwaysAllowPackage: Bool = false
     ) async throws -> ApprovalDecisionResponse {
         guard isValidApprovalId(approvalId) else {
             throw ControlAPIError(statusCode: nil, userMessage: "That is not a Conduit request id.")
         }
-        let body = Self.decisionBody(decision, channel: channel, reason: reason, forThisChat: forThisChat)
+        let body = Self.decisionBody(decision, channel: channel, reason: reason, forThisChat: forThisChat, alwaysAllowPackage: alwaysAllowPackage)
         // Approving a review runs it before Control answers, so allow time.
         return try await send(.decide(id: approvalId, decision), body: body, timeout: 60)
     }
 
-    public static func decisionBody(_ decision: ApprovalDecision, channel: DecisionChannel, reason: String? = nil, forThisChat: Bool = false) -> [String: String] {
+    public static func decisionBody(
+        _ decision: ApprovalDecision,
+        channel: DecisionChannel,
+        reason: String? = nil,
+        forThisChat: Bool = false,
+        alwaysAllowPackage: Bool = false
+    ) -> [String: String] {
         let defaultReason: String
         switch (decision, channel) {
-        case (.approve, .menubar): defaultReason = forThisChat ? "Allowed for this chat from Conduit menu bar." : "Approved from Conduit menu bar."
+        case (.approve, .menubar):
+            if alwaysAllowPackage {
+                defaultReason = "Always allowed this exact package from Conduit menu bar."
+            } else {
+                defaultReason = forThisChat ? "Allowed for this chat from Conduit menu bar." : "Approved from Conduit menu bar."
+            }
         case (.deny, .menubar): defaultReason = "Denied from Conduit menu bar."
         case (.approve, .notification): defaultReason = "Approved from Conduit notification."
         case (.deny, .notification): defaultReason = "Denied from Conduit notification."
         }
         var body = ["decidedBy": channel.rawValue, "reason": reason ?? defaultReason]
-        if forThisChat && decision == .approve { body["remember"] = "session" }
+        // "Always allow this exact package" wins over "for this chat".
+        if alwaysAllowPackage && decision == .approve {
+            body["remember"] = "package"
+        } else if forThisChat && decision == .approve {
+            body["remember"] = "session"
+        }
         return body
     }
 
@@ -244,6 +275,21 @@ public final class ControlClient {
     public func setReturnApprovesShellWithoutDetails(_ value: Bool) async throws -> ConduitSettings {
         let response: SettingsResponse = try await send(.updateSettings, body: ["returnApprovesShellWithoutDetails": value])
         return response.settings
+    }
+
+    /// Demo profile only: `GET /api/services`, the programs Control started.
+    public func services(timeout: TimeInterval = 0.75) async throws -> [ServiceSummary] {
+        let response: ServicesResponse = try await send(.services, timeout: timeout)
+        return response.services
+    }
+
+    /// Demo profile only: `POST /api/services/:id/stop`.
+    public func stopService(id: String) async throws -> ServiceSummary {
+        guard isValidServiceId(id) else {
+            throw ControlAPIError(statusCode: nil, userMessage: "That is not a Conduit service id.")
+        }
+        let response: ServiceStopResponse = try await send(.stopService(id: id), body: [:])
+        return response.service
     }
 
     private func send<T: Decodable>(_ endpoint: ControlEndpoint, body: [String: Any]? = nil, timeout: TimeInterval = 5) async throws -> T {

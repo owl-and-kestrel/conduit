@@ -144,6 +144,13 @@ struct PopoverView: View {
                 .foregroundStyle(.secondary)
                 .padding(12)
         }
+        // Demo profile only (CONDUIT_DEMO_PROFILE=1 on Control). Off, nothing
+        // here renders and the popover is what it was before S4.
+        if model.demoProfile {
+            Divider()
+            ServicesSection(model: model)
+                .padding(12)
+        }
     }
 
     private var footer: some View {
@@ -266,6 +273,19 @@ private struct AskRow: View {
     let deciding: Bool
     @ObservedObject var model: MenuBarModel
 
+    /// Demo profile only: the request starts programs (service.start). nil
+    /// with the profile off, so the row renders as it did before S4.
+    private var serviceAsk: ServiceAsk? {
+        ServiceAsk.make(for: ask, demoProfile: model.demoProfile)
+    }
+
+    private var approveHelp: String {
+        guard ask.isReview else { return "Allow this one request (Return; a shell command shows its details first)" }
+        // Demo profile only: an approved review runs as demo-review, which can
+        // run programs, so "read-only" would be wrong there.
+        return model.demoProfile ? "Run this one request now; with the demo profile on it may start programs (Return)" : "Run this one request read-only (Return)"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top) {
@@ -281,9 +301,12 @@ private struct AskRow: View {
                 }
                 Spacer()
             }
+            if let serviceAsk {
+                ServiceAskRows(serviceAsk: serviceAsk, model: model)
+            }
             if expanded {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(AskPresentation.details(for: ask).enumerated()), id: \.offset) { _, row in
+                    ForEach(Array(AskPresentation.details(for: ask, demoProfile: model.demoProfile).enumerated()), id: \.offset) { _, row in
                         VStack(alignment: .leading, spacing: 1) {
                             Text(row.label).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                             Text(row.value)
@@ -295,10 +318,23 @@ private struct AskRow: View {
                 }
             }
             HStack(spacing: 8) {
-                Button(ask.isReview ? "Approve once" : "Allow once") { model.actions?.decide(ask.approvalId, .approve) }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(deciding)
-                    .help(ask.isReview ? "Run this one request read-only (Return)" : "Allow this one request (Return; a shell command shows its details first)")
+                if serviceAsk != nil {
+                    Button("Allow once") { model.actions?.decide(ask.approvalId, .approve) }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(deciding)
+                        .help("Run this one request now; the next request asks again (Return)")
+                    if serviceAsk?.offersAlwaysAllow == true && model.packageAllowsSupported {
+                        Button("Always allow this exact package") { model.actions?.decideAlwaysAllowPackage(ask.approvalId) }
+                            .buttonStyle(.bordered)
+                            .disabled(deciding)
+                            .help("Run it now, and start a package with this exact sha256 again without asking. A different sha256 asks again. Revoke with `conduit packages revoke`.")
+                    }
+                } else {
+                    Button(ask.isReview ? "Approve once" : "Allow once") { model.actions?.decide(ask.approvalId, .approve) }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(deciding)
+                        .help(approveHelp)
+                }
                 if AllowForThisChat.isOffered(for: ask) {
                     Button("Allow for this chat") { model.actions?.decideForThisChat(ask.approvalId) }
                         .buttonStyle(.bordered)
@@ -332,5 +368,104 @@ private struct AskRow: View {
         )
         .contentShape(Rectangle())
         .onTapGesture { model.selection.select(ask.approvalId, in: model.state.asks) }
+    }
+}
+
+/// Demo profile only: what a service.start request will run, shown on the ask
+/// itself (not only in Details): who the request says it is from, the exact
+/// sha256 it pins, and whether the program asks to accept connections from the
+/// local network. Disclosure only: Conduit does not check what the program does.
+private struct ServiceAskRows: View {
+    let serviceAsk: ServiceAsk
+    @ObservedObject var model: MenuBarModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            labeled("Starts", serviceAsk.serviceNames.joined(separator: ", "))
+            labeled("From (as the request claims)", serviceAsk.requester)
+            ForEach(serviceAsk.packageDigests, id: \.self) { digest in
+                digestRow("Package sha256", digest)
+            }
+            ForEach(serviceAsk.pathDigests, id: \.self) { digest in
+                digestRow("Entry file sha256 (that one file only)", digest)
+            }
+            if serviceAsk.acceptsLocalNetwork {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "network")
+                        .foregroundStyle(.orange)
+                    Text(ServiceAsk.localNetworkDisclosure)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Text(ServiceAsk.runsCodeNotice)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func labeled(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            Text(value).font(.caption).lineLimit(2).truncationMode(.middle)
+        }
+    }
+
+    private func digestRow(_ label: String, _ digest: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text(ServiceAsk.shortDigest(digest) + "…")
+                    .font(.system(.caption, design: .monospaced))
+                    .help(digest)
+                Button("Copy full sha256") { model.actions?.copyToClipboard(digest, what: "sha256") }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+            }
+        }
+    }
+}
+
+/// Demo profile only: the programs service.start started, with Stop
+/// (POST /api/services/:id/stop, the same call as `conduit services stop`).
+/// Stop is the person's control, not automatic cleanup.
+private struct ServicesSection: View {
+    @ObservedObject var model: MenuBarModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Services")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if model.runningServices.isEmpty {
+                Text("No services running.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(model.runningServices) { row in
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(row.name)
+                            .font(.callout.weight(.medium))
+                            .lineLimit(1)
+                        Text([row.address, row.state, row.uptime.isEmpty ? nil : "up \(row.uptime)"].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer()
+                    if model.stoppingServiceIds.contains(row.id) {
+                        ProgressView().controlSize(.small)
+                    }
+                    Button("Stop") { model.actions?.stopService(row.id) }
+                        .controlSize(.small)
+                        .disabled(model.stoppingServiceIds.contains(row.id) || row.state == "stopping")
+                        .help("Stop this program (SIGTERM, then SIGKILL after a grace)")
+                }
+            }
+        }
     }
 }

@@ -62,6 +62,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingFocusApprovalId: String?
     private var healthTimer: Timer?
     private var terminationConfirmed = false
+    /// Demo profile only: which ready services open in the browser. See
+    /// BrowserOpenTracker for the rule (runs this app started in this session).
+    private var browserOpens = BrowserOpenTracker()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         model.actions = self
@@ -200,16 +203,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let control: ControlState? = if adopted && status?.capabilities.pause == true { try? await client.control() } else { nil }
             let approvals: [ApprovalSummary]? = if adopted { try? await client.approvals() } else { nil }
             let settings: ConduitSettings? = if adopted && status?.capabilities.settings == true { try? await client.settings() } else { nil }
+            // Demo profile only: nothing is asked of a Control that does not
+            // report it, so with the profile off this poll is what it was.
+            let demoProfile = adopted && DemoProfile.isOn(status)
+            let services: [ServiceSummary]? = if demoProfile && status?.capabilities.services == true { try? await client.services() } else { nil }
             await MainActor.run {
                 self.pollInFlight = false
                 // Unknown settings fall back to the cautious default (off).
                 self.model.settingsSupported = settings != nil
                 self.model.returnApprovesShellWithoutDetails = settings?.returnApprovesShellWithoutDetails ?? false
+                self.applyDemoServices(demoProfile: demoProfile, packageAllows: demoProfile && status?.capabilities.packageAllows == true, services: services)
                 self.applyPoll(status: status, control: control, approvals: approvals)
             }
         }
         refreshAgentListenerHealth()
         observeServiceTrees()
+    }
+
+    /// Demo profile only: the Services rows, and opening a service's page in
+    /// the default browser once it is ready, only for runs this app started
+    /// in this session (BrowserOpenTracker). Off: the rows stay empty and
+    /// nothing opens.
+    private func applyDemoServices(demoProfile: Bool, packageAllows: Bool, services: [ServiceSummary]?) {
+        // Assign only on change, so with the profile off this publishes nothing.
+        if model.demoProfile != demoProfile { model.demoProfile = demoProfile }
+        if model.packageAllowsSupported != packageAllows { model.packageAllowsSupported = packageAllows }
+        guard demoProfile, let services else {
+            if !model.runningServices.isEmpty { model.runningServices = [] }
+            if !model.stoppingServiceIds.isEmpty { model.stoppingServiceIds = [] }
+            return
+        }
+        model.runningServices = RunningServiceRow.rows(services, now: Date())
+        model.stoppingServiceIds = model.stoppingServiceIds.intersection(Set(model.runningServices.map(\.id)))
+        for service in browserOpens.servicesToOpen(services) {
+            guard let address = service.url, let url = URL(string: address) else { continue }
+            NSWorkspace.shared.open(url)
+            model.show("\(service.name) is ready and opened in your browser (\(address)).", isError: false)
+        }
     }
 
     /// Records each launched service's process-tree members, so Stop all also
@@ -414,7 +444,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Decisions (decidedBy: menubar | notification)
 
-    private func decide(_ approvalId: String, _ decision: ApprovalDecision, channel: DecisionChannel, forThisChat: Bool = false) {
+    private func decide(_ approvalId: String, _ decision: ApprovalDecision, channel: DecisionChannel, forThisChat: Bool = false, alwaysAllowPackage: Bool = false) {
         guard !model.deciding.contains(approvalId) else { return }
         // Asks come only from this checkout's Control; if the port changed
         // hands since, decide nothing rather than answer another checkout's.
@@ -431,9 +461,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let isError: Bool
             let settledStatus: String?
             do {
-                let response = try await client.decide(approvalId: approvalId, decision, channel: channel, forThisChat: forThisChat)
+                let response = try await client.decide(approvalId: approvalId, decision, channel: channel, forThisChat: forThisChat, alwaysAllowPackage: alwaysAllowPackage)
+                if decision == .approve, channel == .menubar, let runId = response.execution?.runId {
+                    // Demo profile only: a service this run started opens in
+                    // the browser once ready. Off, no services are ever listed.
+                    await MainActor.run { if self.model.demoProfile { self.browserOpens.track(runId: runId) } }
+                }
                 message = decision == .approve
-                    ? (forThisChat ? "Allowed for this chat. The same exact action runs without asking until the chat is revoked or Conduit restarts." : response.statusMessage)
+                    ? (forThisChat
+                        ? "Allowed for this chat. The same exact action runs without asking until the chat is revoked or Conduit restarts."
+                        : alwaysAllowPackage
+                            ? "Always allowed this exact package: the same sha256 starts again without asking until you revoke it (`conduit packages revoke`). \(response.statusMessage)"
+                            : response.statusMessage)
                     : "Denied. Nothing ran."
                 isError = false
                 settledStatus = decision == .approve ? "approved" : "denied"
@@ -750,6 +789,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             // in the popover (details open) rather than a modal alert.
                             self.showPopover(focusOldestAsk: false, approvalId: approvalId)
                         } else if let runId = result.execution.runId {
+                            // Demo profile only: a link this app handed to
+                            // Control that ran without an ask (an allowed
+                            // package); its service opens in the browser once
+                            // ready. Off, no services are ever listed.
+                            if self.model.demoProfile { self.browserOpens.track(runId: runId) }
                             self.postNotice("Conduit link executed", body: "Run \(runId) is ready in Conduit.")
                         } else {
                             self.postNotice("Conduit link handled", body: result.execution.reason ?? "Conduit handled the request.")
@@ -1145,6 +1189,48 @@ extension AppDelegate: MenuBarActions {
 
     func decideForThisChat(_ approvalId: String) {
         decide(approvalId, .approve, channel: .menubar, forThisChat: true)
+    }
+
+    /// Demo profile only: the same call as `conduit approvals approve <id>
+    /// --always-allow-package` (`remember: "package"`). Control refuses it
+    /// unless the request only starts sha256-pinned packages.
+    func decideAlwaysAllowPackage(_ approvalId: String) {
+        decide(approvalId, .approve, channel: .menubar, alwaysAllowPackage: true)
+    }
+
+    /// Demo profile only: the same call as `conduit services stop <id>`.
+    func stopService(_ serviceId: String) {
+        guard controlAdoption.adopted else {
+            model.show("Nothing was stopped: the control app on port 47831 is not this checkout's.", isError: true)
+            return
+        }
+        guard !model.stoppingServiceIds.contains(serviceId) else { return }
+        let name = model.runningServices.first { $0.id == serviceId }?.name ?? "The service"
+        model.stoppingServiceIds.insert(serviceId)
+        Task {
+            let message: String
+            let isError: Bool
+            do {
+                let stopped = try await client.stopService(id: serviceId)
+                message = "Stopped \(stopped.name)."
+                isError = false
+            } catch {
+                message = "\(name) was not stopped: \((error as? ControlAPIError)?.userMessage ?? error.localizedDescription)"
+                isError = true
+            }
+            await MainActor.run {
+                self.model.stoppingServiceIds.remove(serviceId)
+                self.model.show(message, isError: isError)
+                self.poll()
+            }
+        }
+    }
+
+    func copyToClipboard(_ text: String, what: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        model.show("Copied the full \(what).", isError: false)
     }
 
     /// The same call as `conduit settings set` and the web panel's checkbox.

@@ -12,6 +12,15 @@ import { withFileLock } from '../state/file-lock.js';
 // claim cannot decide anything. A different digest asks again.
 // - Only a request whose every action starts a sha256-pinned package skips the
 //   ask; any other action in the request makes it ask.
+// - Network mode (Jon 2026-10-20): each allow also records the network mode of
+//   the start it was approved for — 'local' (loopback) or 'lan' (`lan: true`,
+//   which is what binds 0.0.0.0). A 'local' allow does not cover a later
+//   `lan: true` start of the same digest (that asks again); a 'lan' allow also
+//   covers 'local' starts, the narrower exposure. Revoking one digest revokes
+//   every mode.
+// - Migration: records written before the mode existed are hash-only, so they
+//   are read as 'local' and marked `networkMigrated: true` (conservative: a LAN
+//   start of such a digest asks once, then records its own 'lan' allow).
 // - Revoking an allow restores the ask.
 // - The store exists only under the demo profile (the panel refuses
 //   `remember: 'package'` while the switch is off).
@@ -26,6 +35,13 @@ import { withFileLock } from '../state/file-lock.js';
 
 export const REMEMBER_THIS_PACKAGE = 'package' as const;
 
+/**
+ * The network exposure of a `service.start` (Jon 2026-10-20): 'lan' binds
+ * 0.0.0.0, 'local' stays on loopback — the same condition the service registry
+ * keys the bind on.
+ */
+export type PackageAllowNetwork = 'local' | 'lan';
+
 export interface PackageAllow {
   /** `'allow_' + random hex`; stable across the store's lifetime. */
   allowId: string;
@@ -34,6 +50,13 @@ export interface PackageAllow {
   allowedAt: string;
   allowedBy: string;
   approvalId: string;
+  /**
+   * The network mode this allow was recorded for (Jon 2026-10-20): 'lan'
+   * covers both modes, 'local' only local-only starts of the same digest.
+   */
+  network: PackageAllowNetwork;
+  /** Set on version-1 (hash-only) records, read conservatively as 'local'. */
+  networkMigrated?: true;
   /**
    * Provenance: what the request claimed (claimed url, shown title and the
    * request's own `source`), not verified. The sha256 of the unpacked bytes is
@@ -47,7 +70,7 @@ export interface PackageAllow {
 }
 
 interface PackageAllowStore {
-  version: 1;
+  version: 2;
   allows: PackageAllow[];
 }
 
@@ -57,18 +80,56 @@ function storePath(): string {
   return path.join(getStateRoot(), 'package-allows.json');
 }
 
+/**
+ * The network mode of one `service.start` args object: 'lan' exactly when it
+ * asks for `lan: true` (which binds 0.0.0.0), 'local' otherwise (loopback).
+ */
+export function networkOfStart(args: Record<string, unknown>): PackageAllowNetwork {
+  return args.lan === true ? 'lan' : 'local';
+}
+
+/**
+ * Whether an allow's network covers a requested start's network (Jon
+ * 2026-10-20): a 'lan' allow covers both modes; a 'local' allow covers only a
+ * 'local' start — the narrower exposure never grows the recorded one.
+ */
+export function allowCovers(allowNetwork: PackageAllowNetwork, requested: PackageAllowNetwork): boolean {
+  return allowNetwork === 'lan' || requested === 'local';
+}
+
+/**
+ * Reads one stored record into the version-2 shape: a missing or invalid
+ * network (a hash-only version-1 record, or corrupt data) reads as 'local' and
+ * is marked `networkMigrated: true`; the next save writes the normalized
+ * record.
+ */
+function normalizeAllow(raw: unknown): PackageAllow {
+  const allow = (raw ?? {}) as PackageAllow;
+  const migrated = allow.network !== 'lan' && allow.network !== 'local';
+  const network: PackageAllowNetwork = migrated ? 'local' : allow.network;
+  const normalized: PackageAllow = { ...allow, network };
+  if (migrated) {
+    normalized.networkMigrated = true;
+  } else {
+    delete normalized.networkMigrated;
+  }
+  return normalized;
+}
+
 async function loadStore(): Promise<PackageAllowStore> {
   try {
     const text = await readFile(storePath(), 'utf8');
     const parsed = JSON.parse(text) as { version?: unknown; allows?: unknown };
+    // Any stored version is accepted; records are normalized here (network
+    // migration) so every reader sees the version-2 shape.
     if (parsed && Array.isArray(parsed.allows)) {
-      return { version: 1, allows: parsed.allows as PackageAllow[] };
+      return { version: 2, allows: parsed.allows.map(normalizeAllow) };
     }
   } catch {
     // Missing or unreadable store reads as an empty list, never as a failure:
     // a missing allow only means the person is asked again (fail closed).
   }
-  return { version: 1, allows: [] };
+  return { version: 2, allows: [] };
 }
 
 async function saveStore(store: PackageAllowStore): Promise<void> {
@@ -84,11 +145,11 @@ async function saveStore(store: PackageAllowStore): Promise<void> {
  * the request makes this null, so the request can never skip the ask because
  * of the packages it also starts.
  */
-export function packageOnlyDigests(actions: unknown): Array<{ sha256: string; url: string }> | null {
+export function packageOnlyDigests(actions: unknown): Array<{ sha256: string; url: string; network: PackageAllowNetwork }> | null {
   if (!Array.isArray(actions) || actions.length === 0) {
     return null;
   }
-  const digests: Array<{ sha256: string; url: string }> = [];
+  const digests: Array<{ sha256: string; url: string; network: PackageAllowNetwork }> = [];
   for (const action of actions) {
     if (!action || typeof action !== 'object' || (action as { tool?: unknown }).tool !== 'service.start') {
       return null;
@@ -109,7 +170,7 @@ export function packageOnlyDigests(actions: unknown): Array<{ sha256: string; ur
     if (typeof url !== 'string' || url.length === 0) {
       return null;
     }
-    digests.push({ sha256, url });
+    digests.push({ sha256, url, network: networkOfStart(args as Record<string, unknown>) });
   }
   return digests;
 }
@@ -120,25 +181,33 @@ export async function listPackageAllows(): Promise<PackageAllow[]> {
   return [...store.allows].sort((a, b) => b.allowedAt.localeCompare(a.allowedAt));
 }
 
-/** The active record for this exact digest, or null (which means: ask). */
-export async function findActivePackageAllow(sha256: string): Promise<PackageAllow | null> {
+/**
+ * The newest active record for this exact digest whose network covers the
+ * requested start's network mode, or null (which means: ask). The mode is
+ * required: a 'local' allow covers only local starts, a 'lan' allow covers
+ * both (Jon 2026-10-20).
+ */
+export async function findActivePackageAllow(sha256: string, network: PackageAllowNetwork): Promise<PackageAllow | null> {
   if (!SHA256_PATTERN.test(sha256)) {
     return null;
   }
   const store = await loadStore();
   const matches = store.allows
-    .filter((allow) => allow.sha256 === sha256 && allow.state === 'active')
+    .filter((allow) => allow.sha256 === sha256 && allow.state === 'active' && allowCovers(allow.network, network))
     .sort((a, b) => b.allowedAt.localeCompare(a.allowedAt));
   return matches[0] ?? null;
 }
 
 /**
- * Records one allow per distinct sha256. An already-active allow for that
- * digest is returned as-is (idempotent): approving the same package twice
- * never creates two records, and the first approval stays the provenance.
+ * Records one allow per distinct sha256, keyed by the sha256 AND the network
+ * mode of the ask (Jon 2026-10-20): a digest started several ways in one
+ * request collapses to the WIDEST mode seen ('lan' when any start asks for
+ * `lan: true`). An active record that already covers that mode is returned
+ * as-is (idempotent); an older active record of the narrower mode stays active
+ * and the list shows both (a new 'lan' ask sits next to an old 'local' allow).
  */
 export async function addPackageAllows(input: {
-  packages: Array<{ sha256: string; url: string }>;
+  packages: Array<{ sha256: string; url: string; network: PackageAllowNetwork }>;
   approvalId: string;
   decidedBy: string;
   title?: string | null;
@@ -150,17 +219,26 @@ export async function addPackageAllows(input: {
   return withFileLock(storePath(), async () => {
     const store = await loadStore();
     const allowedAt = new Date().toISOString();
-    const seen = new Set<string>();
+    const widest = new Map<string, { sha256: string; url: string; network: PackageAllowNetwork }>();
     const records: PackageAllow[] = [];
     for (const pkg of input.packages) {
       if (!SHA256_PATTERN.test(pkg.sha256)) {
         throw new Error(`Package sha256 must be 64 lowercase hex digits, got: ${JSON.stringify(pkg.sha256)}`);
       }
-      if (seen.has(pkg.sha256)) {
-        continue;
+      if (pkg.network !== 'local' && pkg.network !== 'lan') {
+        throw new Error(`Package allow network must be 'local' or 'lan', got: ${JSON.stringify(pkg.network)}`);
       }
-      seen.add(pkg.sha256);
-      const existing = store.allows.find((allow) => allow.sha256 === pkg.sha256 && allow.state === 'active');
+      const seen = widest.get(pkg.sha256);
+      widest.set(pkg.sha256, {
+        sha256: pkg.sha256,
+        url: seen ? (seen.url || pkg.url) : pkg.url,
+        network: seen ? (seen.network === 'lan' || pkg.network === 'lan' ? 'lan' : 'local') : pkg.network
+      });
+    }
+    for (const pkg of widest.values()) {
+      const existing = store.allows.find(
+        (allow) => allow.sha256 === pkg.sha256 && allow.state === 'active' && allowCovers(allow.network, pkg.network)
+      );
       if (existing) {
         records.push(existing);
         continue;
@@ -174,7 +252,8 @@ export async function addPackageAllows(input: {
         approvalId: input.approvalId,
         url: pkg.url,
         title: input.title ?? null,
-        source: input.source
+        source: input.source,
+        network: pkg.network
       };
       store.allows.push(record);
       records.push(record);
@@ -185,9 +264,11 @@ export async function addPackageAllows(input: {
 }
 
 /**
- * Marks every active record for this digest revoked; the ask comes back the
- * next time that package wants to start. Returns the records it revoked ([]/
- * 404 when none was active).
+ * Marks every active record for this digest revoked — of every network mode,
+ * since one digest is one package no matter how it asked to bind (Jon
+ * 2026-10-20) — so the ask comes back the next time that package wants to
+ * start, over any mode. Returns the records it revoked ([]/404 when none was
+ * active).
  */
 export async function revokePackageAllow(sha256: string, by: string): Promise<PackageAllow[]> {
   return withFileLock(storePath(), async () => {

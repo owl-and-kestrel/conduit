@@ -311,7 +311,7 @@ for (const decision of ['approve', 'deny'] as const) {
     .option('--reason <text>', 'decision reason recorded on the approval');
   if (decision === 'approve') {
     command.option('--for-this-chat', 'Allow for this chat: the same exact shell command or file write in this chat runs without asking again. Ends when the chat is revoked or Conduit restarts.', false);
-    command.option('--always-allow-package', 'Demo profile only: always allow this exact package (by sha256); revoke with `conduit packages revoke`.', false);
+    command.option('--always-allow-package', 'Demo profile only: always allow this exact package (by sha256 and network mode: an allow for a local-only start does not cover a later LAN start; a LAN allow also covers local starts); revoke with `conduit packages revoke`.', false);
   }
   command
     .option('--url <url>', 'Conduit Control URL')
@@ -462,7 +462,7 @@ const packagesCommand = program.command('packages')
 // the demo switch; reportDemoServicesError says so plainly, as for services.
 
 packagesCommand.command('allowed')
-  .description('List packages always allowed by sha256, newest first ("Always allow this exact package").')
+  .description('List packages always allowed by sha256, newest first ("Always allow this exact package"), showing each allow\'s network mode (local or lan).')
   .option('--url <url>', 'Conduit Control URL')
   .option('--json', 'print the raw API response', false)
   .action(async (options: { url?: string; json: boolean }) => {
@@ -485,7 +485,7 @@ packagesCommand.command('allowed')
   });
 
 packagesCommand.command('revoke')
-  .description('Revoke a package allow by its sha256; the next start of that package asks again.')
+  .description('Revoke a package allow by its sha256: revokes every active allow for that sha256, whatever its network mode; the next start of that package asks again.')
   .argument('<sha256>', 'the package sha256 (64 lowercase hex digits)')
   .option('--url <url>', 'Conduit Control URL')
   .option('--json', 'print the raw API response', false)

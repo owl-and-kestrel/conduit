@@ -219,7 +219,8 @@ public final class ControlClient {
     /// `forThisChat` is "Allow for this chat": Control remembers the approval
     /// for that one chat (session) only, and refuses it for anything else.
     /// `alwaysAllowPackage` is "Always allow this exact package" (demo
-    /// profile): Control remembers the approved package by digest.
+    /// profile): Control remembers the approved package by digest and network
+    /// mode (a local-only allow does not cover a later LAN start).
     public func decide(
         approvalId: String,
         _ decision: ApprovalDecision,

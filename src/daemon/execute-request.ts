@@ -292,12 +292,14 @@ export async function executeApprovedReview(
 /**
  * "Always allow this exact package" (demo profile only): when EVERY action of
  * an untrusted request starts a package whose sha256 the person has already
- * allowed (an active record in the package-allow store), the request runs
- * directly with no ask, exactly like an approved review apart from the
- * metadata (`allowed-package`) and synthetic session id. Returns null — the
- * normal untrusted-review path — when the demo switch is off, the actions are
- * not all package starts, or any digest lacks an active allow (fail closed:
- * one unallowed package makes the whole request ask).
+ * allowed, and whose allow also covers each start's network mode ('lan' binds
+ * 0.0.0.0 — a 'local' allow does not cover it, a 'lan' allow covers both;
+ * Jon 2026-10-20), the request runs directly with no ask, exactly like an
+ * approved review apart from the metadata (`allowed-package`) and synthetic
+ * session id. Returns null — the normal untrusted-review path — when the demo
+ * switch is off, the actions are not all package starts, or any digest lacks
+ * an active allow covering its mode (fail closed: one unallowed package makes
+ * the whole request ask).
  */
 async function executeAllowedPackageRequest(
   request: ActionRequestBlock,
@@ -311,8 +313,8 @@ async function executeAllowedPackageRequest(
     return null;
   }
   const allowIds: string[] = [];
-  for (const { sha256 } of digests) {
-    const allow = await findActivePackageAllow(sha256);
+  for (const { sha256, network } of digests) {
+    const allow = await findActivePackageAllow(sha256, network);
     if (!allow) {
       return null;
     }
@@ -405,12 +407,19 @@ async function createUntrustedRequestReview(request: ActionRequestBlock, policyR
   const projectRoot = await resolveProjectRoot([process.cwd()]);
   // Demo profile only, and only for a request where every action starts a
   // sha256-pinned package: mention the "Always allow this exact package"
-  // choice. Off, or for any other request, the prompt is untouched.
+  // choice, and which network mode this ask records (a local-only allow never
+  // covers a later `lan: true` ask, which states that). Off, or for any other
+  // request, the prompt is untouched.
+  const digests = packageOnlyDigests(request.actions);
   const demoPromptLines = isDemoProfileEnabled()
     ? [
-        ...(packageOnlyDigests(request.actions)
+        ...(digests
           ? [
-              `Every action starts a package pinned by sha256 (${packageOnlyDigests(request.actions)!.map((digest) => digest.sha256.slice(0, 12)).join(', ')}). You may choose "Always allow this exact package" so the same package starts without asking again.`
+              `Every action starts a package pinned by sha256 (${digests.map((digest) => digest.sha256.slice(0, 12)).join(', ')}). You may choose "Always allow this exact package" so the same package starts without asking again${
+                digests.some((digest) => digest.network === 'lan')
+                  ? ', including when it accepts connections from the local network.'
+                  : ' on this computer only; a later request for it to accept connections from the local network asks again.'
+              }`
             ]
           : []),
         'Demo profile is on: approving lets these actions run programs on this computer.'

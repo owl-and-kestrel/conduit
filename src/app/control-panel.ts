@@ -443,7 +443,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           const digests = packageOnlyDigests(approval.action.args.actions as Array<Record<string, unknown>>);
           if (digests) {
             packageAllows = await addPackageAllows({
-              packages: digests.map((digest) => ({ sha256: digest.sha256, url: digest.url })),
+              packages: digests.map((digest) => ({ sha256: digest.sha256, url: digest.url, network: digest.network })),
               approvalId: approval.approvalId,
               decidedBy,
               title: typeof approval.action.args.title === 'string' ? approval.action.args.title : null,

@@ -188,11 +188,11 @@ describe('package allow scope (in-process, no fetch)', () => {
   it('an allowed digest never covers another action in the same request', async () => {
     const sha = 'b'.repeat(64);
     await addPackageAllows({
-      packages: [{ sha256: sha, url: 'https://packages.example/pkg.tgz' }],
+      packages: [{ sha256: sha, url: 'https://packages.example/pkg.tgz', network: 'local' }],
       approvalId: 'approval_test',
       decidedBy: 'cli'
     });
-    expect((await findActivePackageAllow(sha))?.sha256).toBe(sha);
+    expect((await findActivePackageAllow(sha, 'local'))?.sha256).toBe(sha);
 
     const mixed = await executeRequestFromUnknown({
       schema: 'conduit.request.v1',
@@ -280,6 +280,7 @@ describe('package service.start with "Always allow this exact package" (real pro
         expect(result.status).toBe('ok');
         // The approval response records the allow.
         expect((approved.body.packageAllows as Array<any>).some((allow) => allow.sha256 === sha)).toBe(true);
+        expect((approved.body.packageAllows as Array<any>).find((allow) => allow.sha256 === sha)?.network).toBe('local');
 
         // Served from inside the package cache, by the pid the result names.
         const pid = result.content.pid as number;

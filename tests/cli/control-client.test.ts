@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { startControlPanel, type ControlPanelHandle } from '../../src/app/control-panel.js';
 import { createApprovalRequest, getApprovalRequest } from '../../src/approvals/approval-store.js';
-import { CONTROL_CLI_ROUTES, ControlApiError, ControlClient, resolveControlUrl } from '../../src/cli/control-client.js';
+import { CONTROL_CLI_ROUTES, ControlApiError, ControlClient, formatPackageAllowLine, resolveControlUrl } from '../../src/cli/control-client.js';
 import type { ClipboardIO } from '../../src/daemon/clipboard-io.js';
 import { createSession, getSession } from '../../src/sessions/session-store.js';
 import { getPauseState } from '../../src/state/pause-state.js';
@@ -205,6 +205,31 @@ describe('CLI / API parity for pause and approvals (S1/S2)', () => {
     await runCli(['resume', '--local'], stateRoot);
     expect((await getPauseState()).paused).toBe(false);
   }, 60_000);
+});
+
+describe('formatPackageAllowLine', () => {
+  it('shows the network mode after the state, and marks migrated hash-only allows', () => {
+    const sha = 'a'.repeat(64);
+    const allow = {
+      allowId: 'allow_1',
+      sha256: sha,
+      state: 'active',
+      allowedAt: '2026-10-20T00:00:00.000Z',
+      allowedBy: 'cli',
+      approvalId: 'approval_1',
+      url: 'http://127.0.0.1:9/pkg.tgz',
+      title: 'Game server'
+    };
+    expect(formatPackageAllowLine({ ...allow, network: 'lan' })).toBe(
+      `${sha}  active  network lan  http://127.0.0.1:9/pkg.tgz  allowed 2026-10-20T00:00:00.000Z  Game server`
+    );
+    expect(formatPackageAllowLine({ ...allow, network: 'local' })).toBe(
+      `${sha}  active  network local  http://127.0.0.1:9/pkg.tgz  allowed 2026-10-20T00:00:00.000Z  Game server`
+    );
+    expect(formatPackageAllowLine({ ...allow, networkMigrated: true })).toBe(
+      `${sha}  active  network local (migrated hash-only allow, read as local)  http://127.0.0.1:9/pkg.tgz  allowed 2026-10-20T00:00:00.000Z  Game server`
+    );
+  });
 });
 
 class MemoryClipboard implements ClipboardIO {

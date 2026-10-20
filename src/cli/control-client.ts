@@ -263,5 +263,8 @@ export function formatPackageAllowLine(allow: any): string {
   const life = revoked
     ? `  revoked ${allow.revokedAt ?? ''} by ${allow.revokedBy ?? ''}`
     : '';
-  return `${allow.sha256}  ${allow.state}  ${allow.url ?? ''}  allowed ${allow.allowedAt}${allow.title ? `  ${allow.title}` : ''}${life}`;
+  // The network mode the allow covers ('lan' also covers local-only starts);
+  // hash-only records written before the mode existed read as local and say so.
+  const network = `network ${allow.network ?? 'local'}${allow.networkMigrated ? ' (migrated hash-only allow, read as local)' : ''}`;
+  return `${allow.sha256}  ${allow.state}  ${network}  ${allow.url ?? ''}  allowed ${allow.allowedAt}${allow.title ? `  ${allow.title}` : ''}${life}`;
 }

@@ -33,6 +33,25 @@ public struct ServiceAsk: Equatable {
 
     public var offersAlwaysAllow: Bool { packageOnly }
 
+    /// The network mode "Always allow this exact package" records for this
+    /// ask (Jon 2026-10-20). It mirrors the server's networkOfStart: "lan"
+    /// when any start has `lan: true`, else "local" (loopback). A local allow
+    /// does not cover a later LAN start of the same package; a LAN allow also
+    /// covers local starts.
+    public var alwaysAllowNetwork: String { acceptsLocalNetwork ? "lan" : "local" }
+
+    /// The Always-allow button's help: what this ask's allow will cover.
+    public var alwaysAllowHelp: String {
+        acceptsLocalNetwork ? Self.alwaysAllowHelpLAN : Self.alwaysAllowHelpLocal
+    }
+
+    /// Shown under the local-network disclosure of a LAN ask that offers
+    /// Always allow: a local-only allow for this package does not cover it.
+    /// nil for a local ask, a mixed request, or a Control without allows.
+    public func localAllowNote(packageAllowsSupported: Bool) -> String? {
+        acceptsLocalNetwork && offersAlwaysAllow && packageAllowsSupported ? Self.localAllowDoesNotCoverLAN : nil
+    }
+
     public init(
         serviceNames: [String],
         packageDigests: [String],
@@ -94,6 +113,9 @@ public struct ServiceAsk: Equatable {
     }
 
     public static let localNetworkDisclosure = "This program asks to accept connections from your local network. Other devices on this network may be able to reach it while it runs."
+    public static let alwaysAllowHelpLocal = "Run it now, and start a package with this exact sha256 again without asking, on this Mac only. This allow does not cover a later request for it to accept connections from your local network: that asks again. A different sha256 asks again. Revoke with `conduit packages revoke`."
+    public static let alwaysAllowHelpLAN = "Run it now, and start a package with this exact sha256 again without asking, including when it accepts connections from your local network, and when it runs on this Mac only. A different sha256 asks again. Revoke with `conduit packages revoke`."
+    public static let localAllowDoesNotCoverLAN = "An Always allow given for this package on this Mac only does not cover your local network, so this start asks."
     public static let runsCodeNotice = "Allowing runs this program on this Mac. Conduit shows what will run and pins its exact bytes; it does not check what the program does."
 }
 

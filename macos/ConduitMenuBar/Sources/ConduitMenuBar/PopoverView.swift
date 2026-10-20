@@ -337,7 +337,7 @@ private struct AskRow: View {
                         Button("Always allow this exact package") { model.actions?.decideAlwaysAllowPackage(ask.approvalId) }
                             .buttonStyle(.bordered)
                             .disabled(deciding)
-                            .help("Run it now, and start a package with this exact sha256 again without asking, including a later request that asks to accept connections from your local network. A different sha256 asks again. Revoke with `conduit packages revoke`.")
+                            .help(serviceAsk.alwaysAllowHelp)
                     }
                     Button("Deny") { model.actions?.decide(ask.approvalId, .deny) }
                         .buttonStyle(.bordered)
@@ -419,6 +419,12 @@ private struct ServiceAskRows: View {
                         .foregroundStyle(.orange)
                     Text(ServiceAsk.localNetworkDisclosure)
                         .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let note = serviceAsk.localAllowNote(packageAllowsSupported: model.packageAllowsSupported) {
+                    Text(note)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

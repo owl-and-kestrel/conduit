@@ -72,6 +72,54 @@ final class DemoServicesTests: XCTestCase {
         XCTAssertTrue(ask.packageOnly)
     }
 
+    // MARK: Always allow remembers the network mode (Jon 2026-10-20)
+
+    private var localPackageStart: String {
+        startActionArgs(#"{"name":"Tiny Arena","package":{"url":"https://example.test/a.tgz","sha256":"\#(sha)"}}"#)
+    }
+
+    func testLocalAskRecordsLocalAndSaysALocalAllowDoesNotCoverLAN() throws {
+        for start in [localPackageStart, startActionArgs(#"{"name":"Tiny Arena","package":{"url":"https://example.test/a.tgz","sha256":"\#(sha)"},"lan":false}"#)] {
+            let ask = try XCTUnwrap(ServiceAsk.make(for: review(actions: "[" + start + "]"), demoProfile: true))
+            XCTAssertFalse(ask.acceptsLocalNetwork)
+            XCTAssertTrue(ask.offersAlwaysAllow)
+            XCTAssertEqual(ask.alwaysAllowNetwork, "local")
+            XCTAssertEqual(ask.alwaysAllowHelp, ServiceAsk.alwaysAllowHelpLocal)
+            XCTAssertTrue(ask.alwaysAllowHelp.contains("on this Mac only"))
+            XCTAssertTrue(ask.alwaysAllowHelp.contains("does not cover a later request for it to accept connections from your local network"))
+            // No LAN note on a local ask.
+            XCTAssertNil(ask.localAllowNote(packageAllowsSupported: true))
+        }
+    }
+
+    func testLANAskRecordsLANAndExplainsALocalAllowDoesNotCoverIt() throws {
+        let ask = try XCTUnwrap(ServiceAsk.make(for: review(actions: "[" + packageStart + "]"), demoProfile: true))
+        XCTAssertTrue(ask.acceptsLocalNetwork)
+        XCTAssertEqual(ask.alwaysAllowNetwork, "lan")
+        XCTAssertEqual(ask.alwaysAllowHelp, ServiceAsk.alwaysAllowHelpLAN)
+        XCTAssertTrue(ask.alwaysAllowHelp.contains("including when it accepts connections from your local network"))
+        XCTAssertEqual(ask.localAllowNote(packageAllowsSupported: true), ServiceAsk.localAllowDoesNotCoverLAN)
+        // Without the packageAllows capability there is no Always allow, so no note.
+        XCTAssertNil(ask.localAllowNote(packageAllowsSupported: false))
+        // One LAN start makes the whole request a LAN allow.
+        let mixed = try XCTUnwrap(ServiceAsk.make(for: review(actions: "[" + localPackageStart + "," + packageStart + "]"), demoProfile: true))
+        XCTAssertEqual(mixed.alwaysAllowNetwork, "lan")
+    }
+
+    func testNoHelpTextClaimsAnAllowCoversAnyMode() {
+        // The S4 help said an allow covered a later LAN request; it no longer does.
+        XCTAssertFalse(ServiceAsk.alwaysAllowHelpLocal.contains("including a later request"))
+        XCTAssertFalse(ServiceAsk.alwaysAllowHelpLAN.contains("including a later request"))
+    }
+
+    func testLANNoteIsNilWhenAlwaysAllowIsNotOffered() throws {
+        let actions = "[" + packageStart + "," + #"{"id":"sh","tool":"shell.run","args":{"command":"echo hi"}}"# + "]"
+        let ask = try XCTUnwrap(ServiceAsk.make(for: review(actions: actions), demoProfile: true))
+        XCTAssertTrue(ask.acceptsLocalNetwork)
+        XCTAssertFalse(ask.offersAlwaysAllow)
+        XCTAssertNil(ask.localAllowNote(packageAllowsSupported: true))
+    }
+
     func testPackageOnlyIsFalseForThePathForm() throws {
         let pathStart = startActionArgs(#"{"name":"Tiny Arena","sha256":"\#(sha)","path":"server.mjs"}"#)
         let ask = try XCTUnwrap(ServiceAsk.make(for: review(actions: "[" + pathStart + "]"), demoProfile: true))
@@ -234,7 +282,7 @@ final class DemoProfileOffUnchangedTests: XCTestCase {
     }
 
     func testDemoCopyMakesNoSafetyClaim() {
-        for text in [ServiceAsk.localNetworkDisclosure, ServiceAsk.runsCodeNotice, AskPresentation.demoReviewDecision] {
+        for text in [ServiceAsk.localNetworkDisclosure, ServiceAsk.runsCodeNotice, AskPresentation.demoReviewDecision, ServiceAsk.alwaysAllowHelpLocal, ServiceAsk.alwaysAllowHelpLAN, ServiceAsk.localAllowDoesNotCoverLAN] {
             let lower = text.lowercased()
             for word in ["safe", "secure", "protect", "sandbox", "verified", "trusted"] {
                 XCTAssertFalse(lower.contains(word), "\(word) in: \(text)")

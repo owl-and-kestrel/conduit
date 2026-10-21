@@ -53,8 +53,9 @@ Conduit for macOS
 Install:
 1. Drag Conduit.app to Applications.
 2. Launch Conduit from Applications.
-3. Choose "Open Control Panel" from the menu-bar icon to pair the browser
-   extension, create sessions, and review pending approvals.
+3. Click the Conduit menu-bar icon, open Settings (the gear button), and
+   choose "Open Control Panel" to pair the browser extension, create
+   sessions, and review pending approvals.
 
 This preview build is not signed or notarized yet. On first launch, macOS may
 show a downloaded-app warning or block the app. If blocked, right-click

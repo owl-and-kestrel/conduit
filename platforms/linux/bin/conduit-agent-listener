@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Packaged: <root>/bin/<launcher> next to <root>/runtime. Source checkout:
+# <repo>/platforms/linux/bin/<launcher>. Resolve symlinks so a launcher
+# linked onto PATH still finds its root.
+BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+ROOT="$(cd "$BIN_DIR/.." && pwd)"
+if [[ ! -f "$ROOT/runtime/dist/src/cli/index.js" ]]; then
+  ROOT="$(cd "$BIN_DIR/../../.." && pwd)"
+fi
 cd "$ROOT"
 
 export CONDUIT_PARENT_PID="$$"

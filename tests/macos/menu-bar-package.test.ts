@@ -121,6 +121,14 @@ describe('macOS menu-bar package scaffold', () => {
     expect(packageScript).toContain('--skip-build');
     expect(packageScript).toContain('ln -s /Applications');
     expect(packageScript).toContain('README.txt');
+    // "Open Control Panel" lives in the Settings window, not the menu-bar
+    // popover; the DMG README must send people to Settings.
+    const settingsView = await readText('macos/ConduitMenuBar/Sources/ConduitMenuBar/SettingsView.swift');
+    const popoverView = await readText('macos/ConduitMenuBar/Sources/ConduitMenuBar/PopoverView.swift');
+    expect(settingsView).toContain('Button("Open Control Panel")');
+    expect(popoverView).not.toContain('Open Control Panel');
+    expect(packageScript).toContain('open Settings (the gear button), and\n   choose "Open Control Panel"');
+    expect(packageScript).not.toContain('"Open Control Panel" from the menu-bar icon');
     expect(packageScript).toContain('shasum -a 256');
     expect(packageScript).toContain('conduit-appcast.json');
     expect(packageScript).toContain('CONDUIT_DMG_SHA256');

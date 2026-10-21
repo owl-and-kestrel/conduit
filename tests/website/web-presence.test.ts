@@ -49,6 +49,13 @@ describe('web presence', () => {
     expect(download).toContain('Conduit.dmg');
     expect(download).toContain('drag <code>Conduit.app</code> to Applications');
     expect(download).toContain('Load the browser extension only if you want paired ChatGPT transport');
+    // "Open Control Panel" lives in the Settings window, not the menu-bar popover.
+    const settingsView = await readFile(path.resolve('macos/ConduitMenuBar/Sources/ConduitMenuBar/SettingsView.swift'), 'utf8');
+    const popoverView = await readFile(path.resolve('macos/ConduitMenuBar/Sources/ConduitMenuBar/PopoverView.swift'), 'utf8');
+    expect(settingsView).toContain('Button("Open Control Panel")');
+    expect(popoverView).not.toContain('Open Control Panel');
+    expect(download).toContain('open <strong>Settings</strong> (the gear button), then choose <strong>Open Control Panel</strong>');
+    expect(download).not.toContain('<strong>Open Control Panel</strong> from the menu-bar icon');
     expect(download).toContain('Browser Extension Alpha');
     expect(download).toContain('Prepare extension with Conduit');
     expect(download).toContain('conduit://run?payload=');

@@ -208,20 +208,6 @@ src/protocol/render-result.ts
 
 ### 1.1 Request Block Format
 
-For clipboard/chat flows, support named code blocks:
-
-````txt
-```conduit
-{
-  "type": "conduit.request.v1",
-  "sessionId": "sess_...",
-  "nonce": "call_...",
-  "actions": []
-}
-```
-
-### 1.1 Request Block Format
-
 For clipboard/chat flows, support named code blocks. Use four-backtick fences in documentation when showing examples that themselves contain triple-backtick fences.
 
 ````txt

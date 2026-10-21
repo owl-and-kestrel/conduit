@@ -5,7 +5,8 @@ Conduit currently has three auth-adjacent paths:
 1. `npm run login:system`
    Opens ChatGPT in the user's real default browser with no automation.
 2. `npm run login`
-   Launches a Playwright-controlled persistent browser using `--channel auto`.
+   Launches a Playwright-controlled persistent browser on bundled Chromium
+   (`npm run login:chrome` uses the installed Chrome channel instead).
 3. `npm run conduit -- run --transport clipboard ...`
    Uses the real browser for ChatGPT and manually copies messages through the terminal.
 

@@ -3,8 +3,19 @@ set -euo pipefail
 
 # Packaged: <root>/bin/<launcher> next to <root>/runtime. Source checkout:
 # <repo>/platforms/linux/bin/<launcher>. Resolve symlinks so a launcher
-# linked onto PATH still finds its root.
-BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# linked onto PATH still finds its root. Plain readlink (not GNU readlink -f)
+# keeps this portable; cd -P resolves symlinked directories.
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  if ! command -v readlink >/dev/null 2>&1; then
+    echo "conduit: cannot resolve the symlinked launcher $SOURCE because readlink is not installed; run the launcher from the package bin directory instead." >&2
+    exit 1
+  fi
+  LINK_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" == /* ]] || SOURCE="$LINK_DIR/$SOURCE"
+done
+BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 ROOT="$(cd "$BIN_DIR/.." && pwd)"
 if [[ ! -f "$ROOT/runtime/dist/src/cli/index.js" ]]; then
   ROOT="$(cd "$BIN_DIR/../../.." && pwd)"

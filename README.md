@@ -71,7 +71,9 @@ npm test
 
 `npm ci` pulls one dev-only package, `@owl-kestrel/hatch-contracts`, from the
 Owl + Kestrel registry configured in `.npmrc`. It needs no login.
-`npm ci --omit=dev` skips it.
+`npm ci --omit=dev` skips it. The Linux and Windows preview packages ship a
+`package.json` without devDependencies, so their `npm install --omit=dev`
+needs only the public npm registry.
 
 ### Works on Linux and macOS
 

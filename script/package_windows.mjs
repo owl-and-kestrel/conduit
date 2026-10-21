@@ -4,6 +4,7 @@ import { cp, mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { writePackagedPackageJson } from './packaged_package_json.mjs';
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -23,7 +24,8 @@ await rm(packageRoot, { recursive: true, force: true });
 await rm(archivePath, { force: true });
 await mkdir(path.join(packageRoot, 'runtime', 'dist'), { recursive: true });
 
-await cp(path.join(root, 'package.json'), path.join(packageRoot, 'package.json'));
+// No devDependencies: the package must install from the public registry alone.
+await writePackagedPackageJson(path.join(root, 'package.json'), path.join(packageRoot, 'package.json'));
 await cp(path.join(root, 'dist', 'src'), path.join(packageRoot, 'runtime', 'dist', 'src'), { recursive: true });
 await cp(path.join(root, 'dist', 'scripts'), path.join(packageRoot, 'runtime', 'dist', 'scripts'), { recursive: true });
 await cp(path.join(root, 'platforms', 'desktop-shell-contract.md'), path.join(packageRoot, 'desktop-shell-contract.md'));

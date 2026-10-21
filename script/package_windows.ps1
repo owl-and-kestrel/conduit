@@ -29,7 +29,11 @@ Remove-Item -Recurse -Force $PackageRoot, $ArchivePath -ErrorAction SilentlyCont
 New-Item -ItemType Directory -Force $PackageRoot | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $PackageRoot "runtime") | Out-Null
 
-Copy-Item (Join-Path $Root "package.json") (Join-Path $PackageRoot "package.json")
+# No devDependencies: the package must install from the public registry alone.
+node (Join-Path $Root "script/packaged_package_json.mjs") (Join-Path $Root "package.json") (Join-Path $PackageRoot "package.json")
+if ($LASTEXITCODE -ne 0) {
+  throw "script/packaged_package_json.mjs failed with exit code $LASTEXITCODE"
+}
 New-Item -ItemType Directory -Force (Join-Path $PackageRoot "runtime/dist") | Out-Null
 Copy-Item -Recurse (Join-Path $Root "dist/src") (Join-Path $PackageRoot "runtime/dist/src")
 Copy-Item -Recurse (Join-Path $Root "dist/scripts") (Join-Path $PackageRoot "runtime/dist/scripts")

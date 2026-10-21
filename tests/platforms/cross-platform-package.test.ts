@@ -33,6 +33,8 @@ describe('cross-platform desktop package scaffolds', () => {
     expect(script).toContain('desktop-shell-contract.md');
     expect(script).toContain('Conduit-Report-Bug.ps1');
     expect(script).toContain('npm install --omit=dev');
+    expect(script).toContain('script/packaged_package_json.mjs');
+    expect(script).not.toContain('Copy-Item (Join-Path $Root "package.json")');
 
     const nodeScript = await readText('script/package_windows.mjs');
     expect(nodeScript).toContain('Conduit-win-x64.zip');
@@ -40,6 +42,8 @@ describe('cross-platform desktop package scaffolds', () => {
     expect(nodeScript).toContain('desktop-shell-contract.md');
     expect(nodeScript).toContain('Conduit-Report-Bug.ps1');
     expect(nodeScript).toContain('npm install --omit=dev');
+    expect(nodeScript).toContain("writePackagedPackageJson(path.join(root, 'package.json')");
+    expect(nodeScript).not.toContain("cp(path.join(root, 'package.json')");
 
     const reportBug = await readText('platforms/windows/Conduit-Report-Bug.ps1');
     expect(reportBug).toContain('http://127.0.0.1:47831#diagnostics');
@@ -67,6 +71,8 @@ describe('cross-platform desktop package scaffolds', () => {
     expect(script).toContain('conduit-report-bug');
     expect(script).toContain('npm install --omit=dev');
     expect(script).toContain('tar -C "$DIST_DIR" -czf');
+    expect(script).toContain('node "$ROOT/script/packaged_package_json.mjs" "$ROOT/package.json" "$PACKAGE_ROOT/package.json"');
+    expect(script).not.toContain('cp "$ROOT/package.json"');
 
     const reportBug = await readText('platforms/linux/bin/conduit-report-bug');
     expect(reportBug).toContain('xdg-open');
@@ -77,20 +83,53 @@ describe('cross-platform desktop package scaffolds', () => {
     expect(desktop).toContain('Exec=conduit-open-control');
   });
 
+  // A downloaded package is installed with `npm install --omit=dev` from the
+  // public registry alone (no .npmrc, no lockfile), and npm resolves
+  // devDependencies before omitting them, so the packaged package.json must not
+  // carry any. Runtime dependencies must not come from a scope that .npmrc
+  // routes to a private registry. tests/platforms/linux-package-public-install
+  // proves the install end to end (opt-in, needs the network).
+  it('writes the packaged package.json without devDependencies or privately scoped dependencies', async () => {
+    const work = await mkdtemp(path.join(os.tmpdir(), 'conduit-packaged-json-'));
+    try {
+      const destination = path.join(work, 'package.json');
+      await execFileAsync(process.execPath, [path.resolve('script/packaged_package_json.mjs'), path.resolve('package.json'), destination]);
+      const source = JSON.parse(await readText('package.json'));
+      const packaged = JSON.parse(await readFile(destination, 'utf8'));
+      const { devDependencies, ...rest } = source;
+      expect(devDependencies, 'the source package.json keeps its devDependencies').toBeTruthy();
+      expect(packaged).toEqual(rest);
+      expect(packaged).not.toHaveProperty('devDependencies');
+
+      const privateScopes = (await readText('.npmrc')).split(/\r?\n/)
+        .map((line) => /^\s*(@[^:\s]+):registry\s*=/.exec(line)?.[1])
+        .filter((scope): scope is string => Boolean(scope));
+      expect(privateScopes).toContain('@owl-kestrel');
+      const runtimeDependencies = Object.keys({ ...packaged.dependencies, ...packaged.optionalDependencies, ...packaged.peerDependencies });
+      expect(runtimeDependencies.length).toBeGreaterThan(0);
+      for (const name of runtimeDependencies) {
+        expect(privateScopes.some((scope) => name.startsWith(`${scope}/`)), `${name} resolves only on a private registry`).toBe(false);
+      }
+    } finally {
+      await rm(work, { recursive: true, force: true });
+    }
+  });
+
   // script/package_linux.sh copies platforms/linux/bin/* to <package>/bin/, so
   // a packaged launcher's root is one level above its directory, also when it
   // is reached through a symlink (e.g. one placed on PATH). From a source
   // checkout (no runtime/) the root is the repo, three levels up, and the
-  // launcher falls back to `npm run conduit`. The launchers need
-  // `readlink -f` (GNU coreutils; macOS 12.3+ readlink has it too).
-  it.skipIf(process.platform === 'win32' || !hasReadlinkF())('Linux launchers resolve the package root, and the repo root from a source checkout', async () => {
+  // launcher falls back to `npm run conduit`. The launchers resolve symlinks
+  // with plain `readlink`; the stub readlink below refuses GNU `-f` to keep
+  // them portable to systems without it.
+  it.skipIf(process.platform === 'win32')('Linux launchers resolve the package root, and the repo root from a source checkout', async () => {
     const work = await realpath(await mkdtemp(path.join(os.tmpdir(), 'conduit-linux-launcher-')));
     try {
       const packageRoot = path.join(work, 'extracted', 'conduit-linux-x64');
       const repoRoot = path.join(work, 'checkout');
       const cliDir = path.join(packageRoot, 'runtime', 'dist', 'src', 'cli');
       const fakeBin = path.join(work, 'fake-bin');
-      for (const dir of [path.join(packageRoot, 'bin'), cliDir, path.join(repoRoot, 'platforms', 'linux', 'bin'), fakeBin, path.join(work, 'elsewhere'), path.join(work, 'on-path')]) {
+      for (const dir of [path.join(packageRoot, 'bin'), cliDir, path.join(repoRoot, 'platforms', 'linux', 'bin'), fakeBin, path.join(work, 'elsewhere'), path.join(work, 'on-path'), path.join(work, 'empty-path')]) {
         await mkdir(dir, { recursive: true });
       }
       // Stub runtime and stub npm: report where the launcher ran them from.
@@ -98,6 +137,9 @@ describe('cross-platform desktop package scaffolds', () => {
       await writeFile(path.join(cliDir, 'index.js'), report);
       await writeFile(path.join(fakeBin, 'npm'), `#!${process.execPath}\n${report}`);
       await chmod(path.join(fakeBin, 'npm'), 0o755);
+      const realReadlink = execFileSync('bash', ['-c', 'command -v readlink'], { encoding: 'utf8' }).trim();
+      await writeFile(path.join(fakeBin, 'readlink'), `#!/usr/bin/env bash\nfor arg in "$@"; do\n  if [[ "$arg" == -f ]]; then echo "readlink: illegal option -- f" >&2; exit 1; fi\ndone\nexec ${JSON.stringify(realReadlink)} "$@"\n`);
+      await chmod(path.join(fakeBin, 'readlink'), 0o755);
       const env = { ...process.env, PATH: [fakeBin, path.dirname(process.execPath), process.env.PATH ?? ''].join(path.delimiter) };
       const launchers = {
         'conduit-control': () => ['app', 'start', '--port', '47831'],
@@ -114,10 +156,20 @@ describe('cross-platform desktop package scaffolds', () => {
           await chmod(target, 0o755);
         }
         await symlink(packaged, linked);
-        for (const launcher of [packaged, linked]) {
+        // A relative symlink chain: on-path/<name>-chain -> <name>-rel -> ../extracted/.../bin/<name>.
+        const chained = path.join(work, 'on-path', `${name}-chain`);
+        await symlink(path.join('..', 'extracted', 'conduit-linux-x64', 'bin', name), path.join(work, 'on-path', `${name}-rel`));
+        await symlink(`${name}-rel`, chained);
+        for (const launcher of [packaged, linked, chained]) {
           expect(await run(launcher), `${name} via ${launcher}`).toEqual({ cwd: packageRoot, argv: argv(packageRoot) });
         }
         expect(await run(source), `${name} from a source checkout`).toEqual({ cwd: repoRoot, argv: ['run', 'conduit', '--', ...argv(repoRoot)] });
+
+        // Without readlink, a symlinked launcher stops with a clear message.
+        const noReadlink = await execFileAsync('/bin/bash', [linked], { cwd: path.join(work, 'elsewhere'), env: { PATH: path.join(work, 'empty-path') } })
+          .then(() => ({ code: 0, stderr: '' }), (error: { code?: number; stderr?: string }) => ({ code: error.code, stderr: error.stderr ?? '' }));
+        expect(noReadlink.code, `${name} without readlink`).toBe(1);
+        expect(noReadlink.stderr, `${name} without readlink`).toContain('readlink is not installed');
       }
     } finally {
       await rm(work, { recursive: true, force: true });
@@ -127,11 +179,14 @@ describe('cross-platform desktop package scaffolds', () => {
   // script/package_windows.{ps1,mjs} copy the launchers into the package root
   // itself, next to runtime/, so the packaged root is $PSScriptRoot. Without
   // runtime/ (source checkout, platforms/windows) the repo is two levels up.
+  // Line endings are normalized first: a Windows checkout with
+  // core.autocrlf=true has CRLF files.
   it('Windows launchers use their own directory as the package root', async () => {
     for (const name of ['Conduit-Control.ps1', 'Conduit-Agent-Listener.ps1', 'Conduit-Clipboard-Daemon.ps1']) {
-      const launcher = await readText(path.join('platforms/windows', name));
-      expect(launcher, name).toMatch(/^\$root = \$PSScriptRoot\nif \(-not \(Test-Path \(Join-Path \$root "runtime\/dist\/src\/cli\/index\.js"\)\)\) \{\n  \$root = Split-Path -Parent \(Split-Path -Parent \$PSScriptRoot\)\n\}\nSet-Location \$root$/m);
-      expect(launcher, name).toContain('$cli = Join-Path $root "runtime/dist/src/cli/index.js"');
+      const lf = (await readText(path.join('platforms/windows', name))).replace(/\r\n/g, '\n');
+      for (const [eol, text] of [['as checked out', lf], ['CRLF', lf.replace(/\n/g, '\r\n')]]) {
+        expectWindowsPackageRoot(text, `${name} (${eol})`);
+      }
     }
   });
 
@@ -145,13 +200,10 @@ describe('cross-platform desktop package scaffolds', () => {
 
 const execFileAsync = promisify(execFile);
 
-function hasReadlinkF(): boolean {
-  try {
-    execFileSync('readlink', ['-f', '.'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+// Matches LF and CRLF launcher text alike.
+function expectWindowsPackageRoot(launcher: string, label: string): void {
+  expect(launcher, label).toMatch(/^\$root = \$PSScriptRoot\r?\nif \(-not \(Test-Path \(Join-Path \$root "runtime\/dist\/src\/cli\/index\.js"\)\)\) \{\r?\n  \$root = Split-Path -Parent \(Split-Path -Parent \$PSScriptRoot\)\r?\n\}\r?\nSet-Location \$root\r?$/m);
+  expect(launcher, label).toContain('$cli = Join-Path $root "runtime/dist/src/cli/index.js"');
 }
 
 async function expectExists(file: string): Promise<void> {

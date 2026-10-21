@@ -27,7 +27,8 @@ esac
 rm -rf "$PACKAGE_ROOT" "$ARCHIVE_PATH"
 mkdir -p "$PACKAGE_ROOT/bin" "$PACKAGE_ROOT/share/applications" "$PACKAGE_ROOT/runtime" "$PACKAGE_ROOT/platforms"
 
-cp "$ROOT/package.json" "$PACKAGE_ROOT/package.json"
+# No devDependencies: the package must install from the public registry alone.
+node "$ROOT/script/packaged_package_json.mjs" "$ROOT/package.json" "$PACKAGE_ROOT/package.json"
 mkdir -p "$PACKAGE_ROOT/runtime/dist"
 cp -R "$ROOT/dist/src" "$PACKAGE_ROOT/runtime/dist/src"
 cp -R "$ROOT/dist/scripts" "$PACKAGE_ROOT/runtime/dist/scripts"

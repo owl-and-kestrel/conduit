@@ -33,7 +33,7 @@ export interface ApprovalRecord extends ConfirmationRequest {
    * When a still-pending record stops being decidable. Past it, any read
    * expires the record to `expired` with `decidedBy: 'timeout'` (deny). Records
    * written before this field existed fall back to createdAt + the default
-   * timeout. See `applyLazyExpiry`.
+   * timeout. See `getApprovalExpiry` and `loadApprovalRecord`.
    */
   expiresAt?: string;
   decidedAt?: string;

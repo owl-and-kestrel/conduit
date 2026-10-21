@@ -318,6 +318,21 @@ describe('package cache (preparePackage, in-process, loopback only)', () => {
       expect(String(error)).toMatch(/pax headers included\) than the limit of 150/);
     });
 
+    it('pax bytes under maxUnpackedBytes still count toward it at the next file', async () => {
+      // Review 2026-10-20 (C2 B grade): the pax body alone fits (113 <= 150); pax plus package.json (113 + 69) does not.
+      const archive = makeTarGz([
+        { name: 'global', type: 'g', body: paxRecords({ comment: 'x'.repeat(100) }) },
+        { name: 'package/package.json', body: JSON.stringify(VALID_MANIFEST) },
+        { name: 'package/server.mjs', body: 'x' }
+      ]);
+      const error = await preparePackage(
+        { url: serve(archive), sha256: sha256Of(archive), size: archive.length },
+        { limits: { maxUnpackedBytes: 150 } }
+      ).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(PackageArchiveError);
+      expect(String(error)).toMatch(/than the limit of 150 \(at 'package\/package\.json'\)/);
+    });
+
     it('a size that is given but wrong is rejected', async () => {
       const archive = validPackageTar();
       const error = await preparePackage({

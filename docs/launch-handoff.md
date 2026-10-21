@@ -24,8 +24,9 @@ flow, but should not be required for the core promise.
 The macOS app is the primary v0 install:
 
 - `npm run macos:package` creates `dist/macos/Conduit.dmg`.
-- The DMG includes `Conduit.app`, an Applications shortcut, release notes, and
-  first-launch guidance.
+- The DMG includes `Conduit.app`, an Applications shortcut, and a `README.txt`
+  with install and first-launch guidance; `RELEASE_NOTES.txt` is written next to
+  the DMG in `dist/macos/`.
 - The menu-bar app supervises the control panel, extension listener, and
   clipboard daemon.
 - Conduit Control exposes sessions, approvals, runs, diagnostics, bridge health,
@@ -107,11 +108,12 @@ For a local preview DMG:
 npm run macos:package
 ```
 
-For a launch appcast, provide hosted artifact URLs and the O&K signing key:
+For a launch appcast, provide hosted artifact URLs, the O&K signing key and the signer path:
 
 ```txt
 CONDUIT_RELEASE_BASE_URL="https://example.test/conduit/v0.0.1" \
 OK_RELEASE_PRIVATE_KEY_PEM="$OK_RELEASE_PRIVATE_KEY_PEM" \
+OK_RELEASE_SIGNER="/path/to/ok-release-tools/scripts/sign-manifest.mjs" \
 npm run macos:package
 ```
 

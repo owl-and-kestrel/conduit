@@ -5,7 +5,7 @@ This is the foundational boilerplate for the Conduit Chrome Extension, built to 
 The extension does not bypass auth, solve verification challenges, extract cookies, or disguise automation. The user signs in normally, then explicitly enables the extension bridge.
 
 ## Current Capabilities (Spike Phase)
-- Injects a content script into `https://chatgpt.com/*`.
+- Injects a content script into `https://chatgpt.com/*`, `https://*.chatgpt.com/*` and `https://chat.openai.com/*` (the `content_scripts` matches in `manifest.json`).
 - Decorates visible Conduit protocol code blocks with a distinct header and a copy-only-block button.
 - Observes visible assistant messages for `conduit`, `conduit-call`, `conduit-final`, and `conduit-handshake-request` code blocks.
 - Keeps legacy `<<<ACTIONS_JSON` and `<<<FINAL_JSON` support for compatibility.
